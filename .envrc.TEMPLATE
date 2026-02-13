@@ -1,0 +1,30 @@
+# Honeycomb Configuration
+# Copy this file to .envrc and fill in your actual API key
+
+# When using direnv, updates to the .envrc file will not be picked up until you
+# run 'direnv reload' or 'direnv allow' again
+
+GO_VERSION=$(cat .tool-versions | grep golang)
+echo ""
+if [[ ! $(asdf plugin list | grep golang) ]] ; then
+  echo ""
+  echo "Please install the golang asdf module with:"
+  echo ""
+  echo "  asdf plugin add golang"
+  echo ""
+  exit 1
+fi
+if asdf set golang ${GO_VERSION} && go version > /dev/null 2>&1; then
+  echo "Good to Go with v${GO_VERSION}"
+else
+  echo "⚠️  Missing necessary Go version ${GO_VERSION}"
+  echo ""
+  echo "Install/Upgrade Go with:"
+  echo ""
+  echo "   asdf install golang ${GO_VERSION} && direnv reload"
+  echo ""
+  exit 1
+fi
+
+
+export HONEYCOMB_API_KEY=your_api_key_here
