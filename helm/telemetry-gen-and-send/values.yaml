@@ -6,10 +6,10 @@
 replicaCount: 3
 
 image:
-  repository: honeycomb/telemetry-gen-and-send
+  repository: ghcr.io/tdarwin/telemetry-gen-and-send
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion
-  tag: ""
+  tag: "latest"
 
 imagePullSecrets: []
 nameOverride: ""
@@ -87,11 +87,11 @@ sender:
   # Resource limits for the sender container
   resources:
     limits:
-      cpu: 2000m
-      memory: 1Gi
+      cpu: 6
+      memory: 10Gi
     requests:
-      cpu: 500m
-      memory: 256Mi
+      cpu: 2
+      memory: 2Gi
 
   config:
     otlp:
