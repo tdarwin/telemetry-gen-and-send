@@ -13,7 +13,7 @@ services:
       - --output-dir
       - /data/generated
     volumes:
-      - telemetry-data:/data/generated
+      - telemetry-data:/data
     networks:
       - telemetry-net
     healthcheck:
@@ -31,7 +31,7 @@ services:
       - --config
       - /config/examples/sender-config.yaml
     volumes:
-      - telemetry-data:/data/generated:ro # Read-only access to templates
+      - telemetry-data:/data:ro # Read-only access to templates
     environment:
       # Required - used in examples/sender-config.yaml
       - HONEYCOMB_API_KEY=${HONEYCOMB_API_KEY:?HONEYCOMB_API_KEY is required}
