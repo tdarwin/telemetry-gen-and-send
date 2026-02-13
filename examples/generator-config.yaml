@@ -65,6 +65,15 @@ metrics:
     - k8s_node # Node-level metrics
     - k8s_pod # Pod-level metrics
     - k8s_container # Container-level metrics
+    - jvm_metrics # JVM memory, GC, threads, CPU, classes
+    - http_metrics # HTTP server/client duration, request/response sizes
+    - application_metrics # Cart, payment, ads, recommendations, feature flags
+    - database_metrics # Connection pools, query durations
+    - rpc_metrics # gRPC/RPC server/client metrics
+    - runtime_metrics # Go, Node.js, Python, .NET runtime metrics
+    - messaging_metrics # Kafka consumer metrics
+    - otelcol_metrics # OpenTelemetry Collector receiver/processor/exporter metrics
+    - aspnet_metrics # ASP.NET Core / Kestrel web server metrics
 
 logs:
   # Number of log templates to generate
