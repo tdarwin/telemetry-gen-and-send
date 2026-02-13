@@ -1,0 +1,18 @@
+apiVersion: v2
+name: telemetry-gen-and-send
+description: High-performance OpenTelemetry trace, metric, and log generator for load testing
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - opentelemetry
+  - telemetry
+  - load-testing
+  - observability
+  - honeycomb
+home: https://github.com/honeycomb/telemetry-gen-and-send
+sources:
+  - https://github.com/honeycomb/telemetry-gen-and-send
+maintainers:
+  - name: Honeycomb
+    url: https://www.honeycomb.io

@@ -1,0 +1,115 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "telemetry-gen-and-send.fullname" . }}
+  labels:
+    {{- include "telemetry-gen-and-send.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "telemetry-gen-and-send.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config-generator: {{ include (print $.Template.BasePath "/configmap-generator.yaml") . | sha256sum }}
+        checksum/config-sender: {{ include (print $.Template.BasePath "/configmap-sender.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "telemetry-gen-and-send.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "telemetry-gen-and-send.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      initContainers:
+        - name: generator
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: {{ include "telemetry-gen-and-send.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - telemetry-generator
+            - --config
+            - /config/generator.yaml
+            - --output-dir
+            - /data/generated
+          volumeMounts:
+            - name: telemetry-data
+              mountPath: /data/generated
+            - name: config-generator
+              mountPath: /config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.generator.resources | nindent 12 }}
+      containers:
+        - name: sender
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: {{ include "telemetry-gen-and-send.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - telemetry-sender
+            - --config
+            - /config/sender.yaml
+          env:
+            - name: HONEYCOMB_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "telemetry-gen-and-send.secretName" . }}
+                  key: api-key
+          volumeMounts:
+            - name: telemetry-data
+              mountPath: /data/generated
+              readOnly: true
+            - name: config-sender
+              mountPath: /config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.sender.resources | nindent 12 }}
+      volumes:
+        - name: telemetry-data
+          {{- if eq .Values.storage.type "emptyDir" }}
+          emptyDir:
+            {{- if .Values.storage.emptyDir.sizeLimit }}
+            sizeLimit: {{ .Values.storage.emptyDir.sizeLimit }}
+            {{- end }}
+          {{- else if eq .Values.storage.type "persistentVolumeClaim" }}
+          persistentVolumeClaim:
+            {{- if .Values.storage.persistentVolumeClaim.existingClaim }}
+            claimName: {{ .Values.storage.persistentVolumeClaim.existingClaim }}
+            {{- else }}
+            claimName: {{ include "telemetry-gen-and-send.fullname" . }}
+            {{- end }}
+          {{- end }}
+        - name: config-generator
+          configMap:
+            name: {{ include "telemetry-gen-and-send.fullname" . }}-generator
+        - name: config-sender
+          configMap:
+            name: {{ include "telemetry-gen-and-send.fullname" . }}-sender
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

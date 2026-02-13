@@ -1,0 +1,68 @@
+services:
+  # Generator service - runs once to create telemetry templates
+  generator:
+    image: ${IMAGE_NAME:-honeycomb/telemetry-gen-and-send}:${VERSION:-latest}
+    container_name: telemetry-generator
+    restart: "no"  # Run once and exit
+    command:
+      - telemetry-generator
+      - --config
+      - /config/generator.yaml
+      - --output-dir
+      - /data/generated
+    volumes:
+      - telemetry-data:/data/generated
+      - ./deploy/configs/generator.yaml:/config/generator.yaml:ro
+    networks:
+      - telemetry-net
+    healthcheck:
+      disable: true
+
+  # Sender service - reads templates and sends to OTLP endpoint
+  # Scale with: docker compose up --scale sender=N
+  sender:
+    image: ${IMAGE_NAME:-honeycomb/telemetry-gen-and-send}:${VERSION:-latest}
+    restart: unless-stopped
+    command:
+      - telemetry-sender
+      - --config
+      - /config/sender.yaml
+    volumes:
+      - telemetry-data:/data/generated:ro  # Read-only access to templates
+      - ./deploy/configs/sender.yaml:/config/sender.yaml:ro
+    environment:
+      # Required
+      - HONEYCOMB_API_KEY=${HONEYCOMB_API_KEY:?HONEYCOMB_API_KEY is required}
+      # Optional - with defaults
+      - OTLP_ENDPOINT=${OTLP_ENDPOINT:-api.honeycomb.io:443}
+      - RATE_LIMIT_EPS=${RATE_LIMIT_EPS:-100000}
+      - CONCURRENCY=${CONCURRENCY:-30}
+      - DURATION=${DURATION:-0}
+      - MULTIPLIER=${MULTIPLIER:-0}
+      - BATCH_SIZE_TRACES=${BATCH_SIZE_TRACES:-3000}
+      - BATCH_SIZE_METRICS=${BATCH_SIZE_METRICS:-100}
+      - BATCH_SIZE_LOGS=${BATCH_SIZE_LOGS:-200}
+      - JITTER_MS=${JITTER_MS:-1000}
+      - BACKDATE_MS=${BACKDATE_MS:-0}
+      - INSECURE=${INSECURE:-false}
+    depends_on:
+      generator:
+        condition: service_completed_successfully
+    networks:
+      - telemetry-net
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+volumes:
+  telemetry-data:
+    driver: local
+
+networks:
+  telemetry-net:
+    driver: bridge

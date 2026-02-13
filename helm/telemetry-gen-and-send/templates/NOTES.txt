@@ -1,0 +1,94 @@
+Thank you for installing {{ .Chart.Name }}!
+
+Your release is named {{ .Release.Name }}.
+
+To learn more about the release, try:
+
+  $ helm status {{ .Release.Name }} -n {{ .Release.Namespace }}
+  $ helm get all {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+TELEMETRY SENDER STATUS:
+==========================
+
+1. Check the deployment status:
+
+   kubectl get deployment {{ include "telemetry-gen-and-send.fullname" . }} -n {{ .Release.Namespace }}
+
+2. View pod status (includes init container completion):
+
+   kubectl get pods -l app.kubernetes.io/name={{ include "telemetry-gen-and-send.name" . }} -n {{ .Release.Namespace }}
+
+3. Check generator logs (init container):
+
+   kubectl logs -l app.kubernetes.io/name={{ include "telemetry-gen-and-send.name" . }} -c generator -n {{ .Release.Namespace }}
+
+4. Watch sender logs in real-time:
+
+   kubectl logs -l app.kubernetes.io/name={{ include "telemetry-gen-and-send.name" . }} -c sender -n {{ .Release.Namespace }} -f
+
+CONFIGURATION:
+==============
+
+- Replicas: {{ .Values.replicaCount }}
+- OTLP Endpoint: {{ .Values.sender.config.otlp.endpoint }}
+- Rate Limit: {{ .Values.sender.config.sending.rateLimit.eventsPerSecond }} events/sec per pod
+- Concurrency: {{ .Values.sender.config.sending.concurrency }} workers per pod
+- Duration: {{ .Values.sender.config.sending.duration }} (0 = continuous)
+- Multiplier: {{ .Values.sender.config.sending.multiplier }} (0 = infinite)
+- Storage Type: {{ .Values.storage.type }}
+
+TOTAL THROUGHPUT:
+=================
+
+Expected total throughput: ~{{ mul .Values.replicaCount .Values.sender.config.sending.rateLimit.eventsPerSecond }} events/sec
+({{ .Values.replicaCount }} replicas × {{ .Values.sender.config.sending.rateLimit.eventsPerSecond }} events/sec)
+
+CONTINUOUS OPERATION:
+=====================
+
+{{ if and (eq .Values.sender.config.sending.duration "0") (eq (toString .Values.sender.config.sending.multiplier) "0") }}
+✓ Senders are running in CONTINUOUS mode (will run until stopped)
+
+To stop sending:
+  helm uninstall {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+Or scale to zero:
+  kubectl scale deployment {{ include "telemetry-gen-and-send.fullname" . }} --replicas=0 -n {{ .Release.Namespace }}
+{{ else }}
+⚠ Senders are running in TIME-LIMITED mode
+  - Duration: {{ .Values.sender.config.sending.duration }}
+  - Multiplier: {{ .Values.sender.config.sending.multiplier }}
+  - Senders will stop automatically when either condition is met
+
+For continuous operation, set:
+  --set sender.config.sending.duration="0" --set sender.config.sending.multiplier=0
+{{ end }}
+
+SCALING:
+========
+
+To scale the deployment:
+
+  kubectl scale deployment {{ include "telemetry-gen-and-send.fullname" . }} --replicas=<N> -n {{ .Release.Namespace }}
+
+Or use Helm:
+
+  helm upgrade {{ .Release.Name }} {{ .Chart.Name }} --set replicaCount=<N> -n {{ .Release.Namespace }}
+
+TROUBLESHOOTING:
+================
+
+If pods are not starting:
+  kubectl describe pod -l app.kubernetes.io/name={{ include "telemetry-gen-and-send.name" . }} -n {{ .Release.Namespace }}
+
+If generator fails:
+  kubectl logs -l app.kubernetes.io/name={{ include "telemetry-gen-and-send.name" . }} -c generator -n {{ .Release.Namespace }}
+
+If sender fails:
+  kubectl logs -l app.kubernetes.io/name={{ include "telemetry-gen-and-send.name" . }} -c sender -n {{ .Release.Namespace }}
+
+Check ConfigMaps:
+  kubectl get configmap -l app.kubernetes.io/name={{ include "telemetry-gen-and-send.name" . }} -n {{ .Release.Namespace }}
+
+Check Secret:
+  kubectl get secret {{ include "telemetry-gen-and-send.secretName" . }} -n {{ .Release.Namespace }}

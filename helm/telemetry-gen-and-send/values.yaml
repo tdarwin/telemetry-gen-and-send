@@ -1,0 +1,191 @@
+# Default values for telemetry-gen-and-send
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Number of sender pods to run
+replicaCount: 3
+
+image:
+  repository: honeycomb/telemetry-gen-and-send
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Honeycomb authentication
+honeycomb:
+  # Honeycomb API key - set this or use existingSecret
+  apiKey: ""
+  # Name of existing secret containing the API key
+  # The secret should have a key named "api-key"
+  existingSecret: ""
+
+# Generator configuration (runs as init container)
+generator:
+  # Resource limits for the generator init container
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+  config:
+    traces:
+      count: 100
+      spans:
+        avgPerTrace: 15
+        stdDev: 5
+        highSpanTraces:
+          enabled: true
+          count: 2
+          spanCount: 1000
+      services:
+        count: 5
+        names:
+          - "api-gateway"
+          - "user-service"
+          - "order-service"
+          - "payment-service"
+          - "inventory-service"
+        ingress:
+          single: true
+          service: "api-gateway"
+      customAttributes:
+        count: 10
+
+    metrics:
+      metricCount: 50
+      timeseriesPerMetric:
+        min: 100
+        max: 500
+        default: 300
+      types:
+        - host_metrics
+        - k8s_cluster
+        - k8s_node
+        - k8s_pod
+        - k8s_container
+
+    logs:
+      count: 1000
+      types:
+        httpAccess:
+          percentage: 40
+        application:
+          percentage: 40
+          services: 5
+        system:
+          percentage: 20
+
+# Sender configuration (runs as main container)
+sender:
+  # Resource limits for the sender container
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 256Mi
+
+  config:
+    otlp:
+      # OTLP endpoint (gRPC)
+      endpoint: "api.honeycomb.io:443"
+      # Set to true for insecure connections (e.g., localhost testing)
+      insecure: false
+      # Additional headers (optional)
+      # headers:
+      #   x-honeycomb-dataset: "telemetry-test"
+
+    sending:
+      rateLimit:
+        # Target throughput in events per second
+        eventsPerSecond: 100000
+      batchSize:
+        traces: 3000
+        metrics: 100
+        logs: 200
+      # Number of concurrent workers
+      concurrency: 30
+      # Duration to send data
+      # Use "0" for continuous operation (default)
+      # Use "5m", "1h", etc. for time-limited tests
+      duration: "0"
+      # How many times to replay templates
+      # Use 0 for infinite replay (default)
+      multiplier: 0
+
+    timestamps:
+      # Random jitter in milliseconds
+      jitterMs: 1000
+      # Backdate timestamps in milliseconds (0 = current time)
+      backdateMs: 0
+
+# Storage configuration
+storage:
+  # Storage type: emptyDir (default, fast, ephemeral) or persistentVolumeClaim
+  type: emptyDir
+  # EmptyDir configuration (used when type=emptyDir)
+  emptyDir:
+    sizeLimit: 1Gi
+  # PVC configuration (used when type=persistentVolumeClaim)
+  persistentVolumeClaim:
+    # Name of existing PVC or create new one
+    existingClaim: ""
+    # Storage class for new PVC (if existingClaim is empty)
+    storageClass: ""
+    # Size of new PVC
+    size: 5Gi
+    # Access mode
+    accessMode: ReadWriteOnce
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+# Pod anti-affinity to spread across nodes
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - telemetry-gen-and-send
+          topologyKey: kubernetes.io/hostname
+
+tolerations: []
+
+nodeSelector: {}
+
+# Graceful shutdown timeout
+terminationGracePeriodSeconds: 30

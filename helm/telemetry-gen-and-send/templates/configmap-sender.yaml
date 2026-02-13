@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "telemetry-gen-and-send.fullname" . }}-sender
+  labels:
+    {{- include "telemetry-gen-and-send.labels" . | nindent 4 }}
+data:
+  sender.yaml: |
+    input:
+      traces: "/data/generated/telemetry-traces.pb"
+      metrics: "/data/generated/telemetry-metrics.pb"
+      logs: "/data/generated/telemetry-logs.pb"
+
+    otlp:
+      endpoint: {{ .Values.sender.config.otlp.endpoint | quote }}
+      headers:
+        x-honeycomb-team: "${HONEYCOMB_API_KEY}"
+        {{- range $key, $value := .Values.sender.config.otlp.headers }}
+        {{ $key }}: {{ $value | quote }}
+        {{- end }}
+      insecure: {{ .Values.sender.config.otlp.insecure }}
+
+    sending:
+      rate_limit:
+        events_per_second: {{ .Values.sender.config.sending.rateLimit.eventsPerSecond }}
+      batch_size:
+        traces: {{ .Values.sender.config.sending.batchSize.traces }}
+        metrics: {{ .Values.sender.config.sending.batchSize.metrics }}
+        logs: {{ .Values.sender.config.sending.batchSize.logs }}
+      concurrency: {{ .Values.sender.config.sending.concurrency }}
+      duration: {{ .Values.sender.config.sending.duration | quote }}
+      multiplier: {{ .Values.sender.config.sending.multiplier }}
+
+    timestamps:
+      jitter_ms: {{ .Values.sender.config.timestamps.jitterMs }}
+      backdate_ms: {{ .Values.sender.config.timestamps.backdateMs }}

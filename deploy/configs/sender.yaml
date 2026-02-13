@@ -1,0 +1,62 @@
+# Telemetry Sender Configuration for Container Deployment
+# This config uses environment variable substitution for runtime configuration
+
+input:
+  # Paths to generated telemetry files (container paths)
+  traces: "/data/generated/telemetry-traces.pb"
+  metrics: "/data/generated/telemetry-metrics.pb"
+  logs: "/data/generated/telemetry-logs.pb"
+
+otlp:
+  # OTLP endpoint (gRPC)
+  endpoint: "${OTLP_ENDPOINT}"
+
+  # Headers to include with requests
+  headers:
+    x-honeycomb-team: "${HONEYCOMB_API_KEY}"
+    # x-honeycomb-dataset: "telemetry-test"  # Optional
+
+  # Set to true for insecure connections (e.g., localhost testing)
+  insecure: ${INSECURE}
+
+sending:
+  rate_limit:
+    # Target throughput in events per second
+    events_per_second: ${RATE_LIMIT_EPS}
+
+  batch_size:
+    # Number of traces to send per batch
+    traces: ${BATCH_SIZE_TRACES}
+    # Number of metric data points to send per batch
+    metrics: ${BATCH_SIZE_METRICS}
+    # Number of log records to send per batch
+    logs: ${BATCH_SIZE_LOGS}
+
+  # Number of concurrent worker goroutines
+  concurrency: ${CONCURRENCY}
+
+  # How long to send data (maximum time limit)
+  # Use Go duration format: "10m", "1h", "30s"
+  # Use "0" for no time limit (continuous operation)
+  duration: "${DURATION}"
+
+  # How many times to replay the templates
+  # Set to 0 for infinite replay (continuous operation)
+  multiplier: ${MULTIPLIER}
+
+  # NOTE: The sender stops when EITHER:
+  #   - All multiplier iterations complete, OR
+  #   - The duration time expires (whichever comes first)
+  #
+  # For continuous operation (default):
+  #   duration: "0", multiplier: 0  → Runs indefinitely until stopped
+  #
+  # For time-limited tests:
+  #   duration: "5m", multiplier: 0  → Runs for exactly 5 minutes
+
+timestamps:
+  # Random jitter to add to timestamps (in milliseconds)
+  jitter_ms: ${JITTER_MS}
+
+  # How far back to set timestamps (in milliseconds)
+  backdate_ms: ${BACKDATE_MS}

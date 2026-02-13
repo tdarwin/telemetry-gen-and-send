@@ -80,7 +80,61 @@ docker run -v $(pwd)/generated:/data/generated \
   telemetry-sender --config /config/sender-config.yaml
 ```
 
-### Option 3: Build from Source
+### Option 3: Docker Compose (Multi-Container Deployment)
+
+For production-like scenarios with automatic orchestration:
+
+```bash
+# 1. Copy environment template
+cp .env.example .env
+
+# 2. Edit .env and set your Honeycomb API key
+nano .env  # or your preferred editor
+
+# 3. Start the deployment
+docker compose up
+
+# 4. Scale senders for higher throughput
+docker compose up --scale sender=10
+```
+
+**Features:**
+- Generator runs once automatically to create templates
+- Sender(s) start automatically after generator completes
+- Shared volume for template storage
+- Easy scaling with `--scale sender=N`
+- Continuous operation by default (stops with `docker compose down`)
+
+See the [Docker Compose](#docker-compose-deployment) section for detailed configuration.
+
+### Option 4: Kubernetes Deployment (Helm Chart)
+
+For Kubernetes environments with horizontal scaling:
+
+```bash
+# Install with Helm
+helm install my-load-test ./helm/telemetry-gen-and-send \
+  --set honeycomb.apiKey="your-api-key-here" \
+  --set replicaCount=5
+
+# Scale deployment
+kubectl scale deployment my-load-test-telemetry-gen-and-send --replicas=20
+
+# View logs
+kubectl logs -l app.kubernetes.io/name=telemetry-gen-and-send -c sender -f
+```
+
+**Features:**
+- Init container pattern (generator runs before sender in each pod)
+- Horizontal pod autoscaling support
+- ConfigMaps for configuration management
+- Resource limits and requests
+- Pod anti-affinity for distribution
+- Continuous operation by default
+
+See the [Helm Chart README](./helm/telemetry-gen-and-send/README.md) for detailed configuration.
+
+### Option 5: Build from Source
 
 **Prerequisites:**
 - Go 1.23+
@@ -336,6 +390,254 @@ make clean
 
 **Problem**: Sender consumes too much memory
 **Solution**: Reduce `sending.multiplier` or generate smaller datasets
+
+## Docker Compose Deployment
+
+Docker Compose provides multi-container orchestration with automatic dependency management.
+
+### Architecture
+
+- **Generator service**: Runs once to create telemetry templates, exits on completion
+- **Sender service(s)**: Start after generator completes, read templates from shared volume
+- **Named volume**: Persists templates across restarts
+- **Continuous operation**: Senders run indefinitely by default (duration=0, multiplier=0)
+
+### Quick Start
+
+```bash
+# 1. Set up environment
+cp .env.example .env
+echo "HONEYCOMB_API_KEY=your-api-key-here" >> .env
+
+# 2. Start (1 generator + 1 sender)
+docker compose up
+
+# 3. Stop gracefully
+docker compose down
+```
+
+### Scaling Senders
+
+```bash
+# Run with 10 sender instances
+docker compose up --scale sender=10
+
+# Background mode
+docker compose up -d --scale sender=5
+
+# Check logs
+docker compose logs -f sender
+```
+
+**Total throughput**: `N senders × events_per_second`
+
+Example: 10 senders × 100k events/sec = **1M events/sec**
+
+### Configuration
+
+All configuration is done via environment variables in `.env`:
+
+```bash
+# Required
+HONEYCOMB_API_KEY=your-api-key-here
+
+# Optional (with defaults)
+OTLP_ENDPOINT=api.honeycomb.io:443
+RATE_LIMIT_EPS=100000      # Events per second per sender
+CONCURRENCY=30             # Workers per sender
+DURATION=0                 # 0 = continuous operation
+MULTIPLIER=0               # 0 = infinite replay
+```
+
+### Continuous vs Time-Limited Operation
+
+**Continuous mode (default)**:
+```bash
+DURATION=0 MULTIPLIER=0 docker compose up
+```
+Senders run until manually stopped with `docker compose down`.
+
+**Time-limited mode**:
+```bash
+DURATION=5m docker compose up
+```
+Senders automatically stop after 5 minutes.
+
+### Common Use Cases
+
+**High-throughput load test**:
+```bash
+RATE_LIMIT_EPS=500000 CONCURRENCY=50 docker compose up --scale sender=20
+```
+Total: 20 × 500k = **10M events/sec**
+
+**Custom OTLP endpoint**:
+```bash
+OTLP_ENDPOINT=localhost:4317 INSECURE=true docker compose up
+```
+
+**Short burst test**:
+```bash
+DURATION=30s RATE_LIMIT_EPS=1000000 docker compose up
+```
+
+### Volume Management
+
+```bash
+# View generated templates
+docker compose exec sender ls -lh /data/generated/
+
+# Clean up volumes
+docker compose down -v
+
+# Keep volume, restart sender
+docker compose restart sender
+```
+
+### Monitoring
+
+```bash
+# View all logs
+docker compose logs -f
+
+# View sender logs only
+docker compose logs -f sender
+
+# Check resource usage
+docker stats
+```
+
+## Kubernetes Deployment (Helm Chart)
+
+Helm chart for production Kubernetes deployments with horizontal scaling and high availability.
+
+### Architecture
+
+- **Init Container (Generator)**: Runs once per pod to create templates
+- **Main Container (Sender)**: Reads templates and sends continuously
+- **emptyDir Volume** (default): Fast ephemeral storage, each pod generates its own templates
+- **PVC Volume** (optional): Persistent storage, templates reused across pods
+- **Continuous operation**: Default mode, senders run until deployment is deleted
+
+### Quick Start
+
+```bash
+# Install with inline API key
+helm install load-test ./helm/telemetry-gen-and-send \
+  --set honeycomb.apiKey="your-api-key-here"
+
+# Or use existing secret (recommended)
+kubectl create secret generic honeycomb-creds \
+  --from-literal=api-key="your-api-key"
+
+helm install load-test ./helm/telemetry-gen-and-send \
+  --set honeycomb.existingSecret="honeycomb-creds"
+
+# View status
+kubectl get pods -l app.kubernetes.io/name=telemetry-gen-and-send
+```
+
+### Scaling
+
+```bash
+# Horizontal scaling - more pods
+kubectl scale deployment load-test-telemetry-gen-and-send --replicas=20
+
+# Or via Helm
+helm upgrade load-test ./helm/telemetry-gen-and-send \
+  --set replicaCount=20 \
+  --reuse-values
+
+# Vertical scaling - more resources per pod
+helm upgrade load-test ./helm/telemetry-gen-and-send \
+  --set sender.config.sending.rateLimit.eventsPerSecond=500000 \
+  --set sender.config.sending.concurrency=50 \
+  --set sender.resources.limits.cpu="4000m" \
+  --reuse-values
+```
+
+### Configuration
+
+Key parameters in `values.yaml`:
+
+```yaml
+replicaCount: 3
+honeycomb:
+  apiKey: "your-api-key"  # or existingSecret
+
+sender:
+  config:
+    otlp:
+      endpoint: "api.honeycomb.io:443"
+    sending:
+      rateLimit:
+        eventsPerSecond: 100000
+      concurrency: 30
+      duration: "0"        # Continuous operation
+      multiplier: 0        # Infinite replay
+```
+
+Total throughput: `replicaCount × eventsPerSecond`
+
+### Common Use Cases
+
+**Continuous load testing**:
+```bash
+helm install continuous ./helm/telemetry-gen-and-send \
+  --set honeycomb.apiKey="key" \
+  --set replicaCount=10 \
+  --set sender.config.sending.rateLimit.eventsPerSecond=200000
+```
+Total: 10 pods × 200k = **2M events/sec**, runs until uninstalled
+
+**Time-limited test**:
+```bash
+helm install time-limited ./helm/telemetry-gen-and-send \
+  --set honeycomb.apiKey="key" \
+  --set sender.config.sending.duration="10m"
+```
+Senders automatically stop after 10 minutes
+
+**High-throughput test**:
+```bash
+helm install high-throughput ./helm/telemetry-gen-and-send \
+  --set honeycomb.apiKey="key" \
+  --set replicaCount=50 \
+  --set sender.config.sending.rateLimit.eventsPerSecond=1000000
+```
+Total: 50 pods × 1M = **50M events/sec**
+
+### Monitoring
+
+```bash
+# Pod status
+kubectl get pods -l app.kubernetes.io/name=telemetry-gen-and-send
+
+# Generator logs (init container)
+kubectl logs -l app.kubernetes.io/name=telemetry-gen-and-send -c generator
+
+# Sender logs (main container) - follow
+kubectl logs -l app.kubernetes.io/name=telemetry-gen-and-send -c sender -f
+
+# Resource usage
+kubectl top pods -l app.kubernetes.io/name=telemetry-gen-and-send
+```
+
+### Stopping and Uninstalling
+
+```bash
+# Stop gracefully (delete deployment)
+helm uninstall load-test
+
+# Or scale to zero (keeps deployment)
+kubectl scale deployment load-test-telemetry-gen-and-send --replicas=0
+```
+
+### Advanced Configuration
+
+For detailed configuration options, see:
+- [Helm Chart README](./helm/telemetry-gen-and-send/README.md)
+- [values.yaml reference](./helm/telemetry-gen-and-send/values.yaml)
 
 ## Examples
 

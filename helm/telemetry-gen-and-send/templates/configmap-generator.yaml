@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "telemetry-gen-and-send.fullname" . }}-generator
+  labels:
+    {{- include "telemetry-gen-and-send.labels" . | nindent 4 }}
+data:
+  generator.yaml: |
+    output:
+      directory: "/data/generated"
+      prefix: "telemetry"
+
+    traces:
+      count: {{ .Values.generator.config.traces.count }}
+      spans:
+        avg_per_trace: {{ .Values.generator.config.traces.spans.avgPerTrace }}
+        std_dev: {{ .Values.generator.config.traces.spans.stdDev }}
+        high_span_traces:
+          enabled: {{ .Values.generator.config.traces.spans.highSpanTraces.enabled }}
+          count: {{ .Values.generator.config.traces.spans.highSpanTraces.count }}
+          span_count: {{ .Values.generator.config.traces.spans.highSpanTraces.spanCount }}
+      services:
+        count: {{ .Values.generator.config.traces.services.count }}
+        {{- if .Values.generator.config.traces.services.names }}
+        names:
+          {{- range .Values.generator.config.traces.services.names }}
+          - {{ . | quote }}
+          {{- end }}
+        {{- end }}
+        ingress:
+          single: {{ .Values.generator.config.traces.services.ingress.single }}
+          service: {{ .Values.generator.config.traces.services.ingress.service | quote }}
+      custom_attributes:
+        count: {{ .Values.generator.config.traces.customAttributes.count }}
+
+    metrics:
+      metric_count: {{ .Values.generator.config.metrics.metricCount }}
+      timeseries_per_metric:
+        min: {{ .Values.generator.config.metrics.timeseriesPerMetric.min }}
+        max: {{ .Values.generator.config.metrics.timeseriesPerMetric.max }}
+        default: {{ .Values.generator.config.metrics.timeseriesPerMetric.default }}
+      types:
+        {{- range .Values.generator.config.metrics.types }}
+        - {{ . }}
+        {{- end }}
+
+    logs:
+      count: {{ .Values.generator.config.logs.count }}
+      types:
+        http_access:
+          percentage: {{ .Values.generator.config.logs.types.httpAccess.percentage }}
+        application:
+          percentage: {{ .Values.generator.config.logs.types.application.percentage }}
+          services: {{ .Values.generator.config.logs.types.application.services }}
+        system:
+          percentage: {{ .Values.generator.config.logs.types.system.percentage }}
