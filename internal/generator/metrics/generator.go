@@ -31,13 +31,12 @@ func (g *Generator) Generate(writeJSON bool) error {
 		g.config.TimeSeriesPerMetric.Min,
 		g.config.TimeSeriesPerMetric.Max,
 		g.config.TimeSeriesPerMetric.Default)
-	fmt.Printf("  Metric types: %v\n", g.config.Types)
 
-	// Get all available metrics
-	allMetrics := GetAllMetrics(g.config.Types)
-	fmt.Printf("  Available metrics from types: %d\n", len(allMetrics))
+	// Get all available metrics from all types
+	allMetrics := GetAllAvailableMetrics()
+	fmt.Printf("  Available metrics: %d\n", len(allMetrics))
 
-	// Select metrics to generate
+	// Select metrics to generate (randomly selected from all available)
 	selectedMetrics := SelectMetrics(allMetrics, g.config.MetricCount)
 	fmt.Printf("  Selected metrics: %d\n", len(selectedMetrics))
 

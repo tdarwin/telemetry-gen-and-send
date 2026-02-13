@@ -65,7 +65,6 @@ type CustomAttributesConfig struct {
 type MetricsConfig struct {
 	MetricCount         int                      `yaml:"metric_count"`
 	TimeSeriesPerMetric TimeSeriesPerMetricConfig `yaml:"timeseries_per_metric"`
-	Types               []string                  `yaml:"types"`
 }
 
 // TimeSeriesPerMetricConfig defines the range of time series per metric
@@ -199,6 +198,10 @@ func (c *GeneratorConfig) Validate() error {
 		return fmt.Errorf("metrics.metric_count must be non-negative")
 	}
 
+	if c.Metrics.MetricCount > 200 {
+		return fmt.Errorf("metrics.metric_count must not exceed 200 (requested: %d)", c.Metrics.MetricCount)
+	}
+
 	if c.Metrics.TimeSeriesPerMetric.Min < 1 {
 		return fmt.Errorf("metrics.timeseries_per_metric.min must be at least 1")
 	}
@@ -239,17 +242,6 @@ func (c *GeneratorConfig) ApplyDefaults() {
 
 	if c.Metrics.TimeSeriesPerMetric.Default == 0 {
 		c.Metrics.TimeSeriesPerMetric.Default = 300
-	}
-
-	// Set default metric types if not specified
-	if len(c.Metrics.Types) == 0 {
-		c.Metrics.Types = []string{
-			"host_metrics",
-			"k8s_cluster",
-			"k8s_node",
-			"k8s_pod",
-			"k8s_container",
-		}
 	}
 
 	// Generate service names if not provided

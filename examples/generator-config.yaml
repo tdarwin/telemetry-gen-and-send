@@ -49,35 +49,17 @@ traces:
     count: 30
 
 metrics:
-  # Number of distinct metric names to generate
-  metric_count: 500
+  # Number of distinct metric names to generate (max: 200)
+  # The generator will randomly select from all available metric types
+  # including host, K8s, JVM, HTTP, database, RPC, runtime, messaging,
+  # OTel collector, ASP.NET, AWS, V8, cache, and browser metrics
+  metric_count: 200
 
-  # Time series per metric
+  # Time series per metric (cardinality)
   timeseries_per_metric:
     min: 100
     max: 500
     default: 300
-
-  # Types of metrics to generate
-  types:
-    - host_metrics # CPU, memory, disk, network
-    - k8s_cluster # Cluster-level metrics
-    - k8s_node # Node-level metrics
-    - k8s_pod # Pod-level metrics
-    - k8s_container # Container-level metrics
-    - jvm_metrics # JVM memory, GC, threads, CPU, classes
-    - http_metrics # HTTP server/client duration, request/response sizes
-    - application_metrics # Cart, payment, ads, recommendations, feature flags
-    - database_metrics # Connection pools, query durations
-    - rpc_metrics # gRPC/RPC server/client metrics
-    - runtime_metrics # Go, Node.js, Python, .NET runtime metrics
-    - messaging_metrics # Kafka consumer metrics
-    - otelcol_metrics # OpenTelemetry Collector receiver/processor/exporter metrics
-    - aspnet_metrics # ASP.NET Core / Kestrel web server metrics
-    - aws_metrics # AWS CloudWatch EC2, EBS, network, status checks
-    - v8_metrics # V8 JavaScript engine heap, GC metrics
-    - cache_metrics # Redis commands, memory, keyspace, replication
-    - browser_metrics # Core Web Vitals, resource timing, page load, user interactions
 
 logs:
   # Number of log templates to generate

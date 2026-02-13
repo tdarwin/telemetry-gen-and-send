@@ -1586,11 +1586,31 @@ func GetMetricsByType(metricType string) []MetricDefinition {
 	}
 }
 
-// GetAllMetrics returns all metric definitions for the given types
-func GetAllMetrics(types []string) []MetricDefinition {
-	allMetrics := make([]MetricDefinition, 0)
+// GetAllAvailableMetrics returns all metric definitions from all available types
+func GetAllAvailableMetrics() []MetricDefinition {
+	allTypes := []string{
+		"host_metrics",
+		"k8s_cluster",
+		"k8s_node",
+		"k8s_pod",
+		"k8s_container",
+		"jvm_metrics",
+		"http_metrics",
+		"application_metrics",
+		"database_metrics",
+		"rpc_metrics",
+		"runtime_metrics",
+		"messaging_metrics",
+		"otelcol_metrics",
+		"aspnet_metrics",
+		"aws_metrics",
+		"v8_metrics",
+		"cache_metrics",
+		"browser_metrics",
+	}
 
-	for _, metricType := range types {
+	allMetrics := make([]MetricDefinition, 0)
+	for _, metricType := range allTypes {
 		metrics := GetMetricsByType(metricType)
 		allMetrics = append(allMetrics, metrics...)
 	}
