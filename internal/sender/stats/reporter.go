@@ -96,7 +96,7 @@ func (r *Reporter) PrintStats() {
 	recentRate := float64(totalEvents) / sinceLastReport.Seconds()
 
 	fmt.Printf("\n[%s] Stats:\n", now.Format("15:04:05"))
-	fmt.Printf("  Traces sent: %d\n", traces)
+	fmt.Printf("  Trace spans sent: %d\n", traces)
 	fmt.Printf("  Metrics sent: %d\n", metrics)
 	fmt.Printf("  Logs sent: %d\n", logs)
 	fmt.Printf("  Total events: %d\n", totalEvents)
@@ -126,7 +126,7 @@ func (r *Reporter) PrintFinalStats() {
 	fmt.Println("\n═══════════════════════════════════════════════════════════")
 	fmt.Println("  Final Statistics")
 	fmt.Println("═══════════════════════════════════════════════════════════")
-	fmt.Printf("Total traces sent:  %d\n", traces)
+	fmt.Printf("Total trace spans sent:  %d\n", traces)
 	fmt.Printf("Total metrics sent: %d\n", metrics)
 	fmt.Printf("Total logs sent:    %d\n", logs)
 	fmt.Printf("Total events sent:  %d\n", totalEvents)
