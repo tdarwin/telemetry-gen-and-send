@@ -1167,6 +1167,381 @@ func GetASPNETMetrics() []MetricDefinition {
 	}
 }
 
+// GetAWSMetrics returns definitions for AWS CloudWatch metrics
+func GetAWSMetrics() []MetricDefinition {
+	return []MetricDefinition{
+		// EC2 metrics
+		{
+			Name:        "aws.ec2.cpu_utilization",
+			Description: "EC2 CPU utilization percentage",
+			Unit:        "%",
+			Type:        MetricTypeGauge,
+			Dimensions:  []string{"InstanceId", "InstanceType"},
+		},
+		{
+			Name:        "aws.ec2.network_in",
+			Description: "Network bytes received",
+			Unit:        "By",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"InstanceId"},
+		},
+		{
+			Name:        "aws.ec2.network_out",
+			Description: "Network bytes transmitted",
+			Unit:        "By",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"InstanceId"},
+		},
+		{
+			Name:        "aws.ec2.network_packets_in",
+			Description: "Network packets received",
+			Unit:        "{packets}",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"InstanceId"},
+		},
+		{
+			Name:        "aws.ec2.network_packets_out",
+			Description: "Network packets transmitted",
+			Unit:        "{packets}",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"InstanceId"},
+		},
+		{
+			Name:        "aws.ec2.disk_read_ops",
+			Description: "Disk read operations",
+			Unit:        "{operations}",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"InstanceId"},
+		},
+		{
+			Name:        "aws.ec2.disk_write_ops",
+			Description: "Disk write operations",
+			Unit:        "{operations}",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"InstanceId"},
+		},
+		{
+			Name:        "aws.ec2.disk_read_bytes",
+			Description: "Disk bytes read",
+			Unit:        "By",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"InstanceId"},
+		},
+		{
+			Name:        "aws.ec2.disk_write_bytes",
+			Description: "Disk bytes written",
+			Unit:        "By",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"InstanceId"},
+		},
+		// EBS metrics
+		{
+			Name:        "aws.ebs.volume_read_ops",
+			Description: "EBS volume read operations",
+			Unit:        "{operations}",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"VolumeId"},
+		},
+		{
+			Name:        "aws.ebs.volume_write_ops",
+			Description: "EBS volume write operations",
+			Unit:        "{operations}",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"VolumeId"},
+		},
+		{
+			Name:        "aws.ebs.volume_read_bytes",
+			Description: "EBS volume bytes read",
+			Unit:        "By",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"VolumeId"},
+		},
+		{
+			Name:        "aws.ebs.volume_write_bytes",
+			Description: "EBS volume bytes written",
+			Unit:        "By",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"VolumeId"},
+		},
+		{
+			Name:        "aws.ebs.burst_balance",
+			Description: "EBS burst balance percentage",
+			Unit:        "%",
+			Type:        MetricTypeGauge,
+			Dimensions:  []string{"VolumeId"},
+		},
+		// Status checks
+		{
+			Name:        "aws.ec2.status_check_failed",
+			Description: "Status check failures",
+			Unit:        "{failures}",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"InstanceId"},
+		},
+		{
+			Name:        "aws.ec2.status_check_failed_instance",
+			Description: "Instance status check failures",
+			Unit:        "{failures}",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"InstanceId"},
+		},
+		{
+			Name:        "aws.ec2.status_check_failed_system",
+			Description: "System status check failures",
+			Unit:        "{failures}",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"InstanceId"},
+		},
+	}
+}
+
+// GetV8Metrics returns definitions for V8 JavaScript engine metrics
+func GetV8Metrics() []MetricDefinition {
+	return []MetricDefinition{
+		{
+			Name:        "v8js.memory.heap.used",
+			Description: "V8 heap memory used",
+			Unit:        "By",
+			Type:        MetricTypeGauge,
+			Dimensions:  []string{},
+		},
+		{
+			Name:        "v8js.memory.heap.limit",
+			Description: "V8 heap memory limit",
+			Unit:        "By",
+			Type:        MetricTypeGauge,
+			Dimensions:  []string{},
+		},
+		{
+			Name:        "v8js.memory.heap.space.available_size",
+			Description: "V8 heap space available size",
+			Unit:        "By",
+			Type:        MetricTypeGauge,
+			Dimensions:  []string{"v8js.heap.space.name"},
+		},
+		{
+			Name:        "v8js.memory.heap.space.physical_size",
+			Description: "V8 heap space physical size",
+			Unit:        "By",
+			Type:        MetricTypeGauge,
+			Dimensions:  []string{"v8js.heap.space.name"},
+		},
+		{
+			Name:        "v8js.gc.duration",
+			Description: "V8 garbage collection duration",
+			Unit:        "ms",
+			Type:        MetricTypeHistogram,
+			Dimensions:  []string{"v8js.gc.type"},
+		},
+		{
+			Name:        "v8js.gc.count",
+			Description: "V8 garbage collection count",
+			Unit:        "{collections}",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"v8js.gc.type"},
+		},
+		{
+			Name:        "v8js.heap.malloced_memory",
+			Description: "V8 malloced memory",
+			Unit:        "By",
+			Type:        MetricTypeGauge,
+			Dimensions:  []string{},
+		},
+		{
+			Name:        "v8js.heap.external_memory",
+			Description: "V8 external memory",
+			Unit:        "By",
+			Type:        MetricTypeGauge,
+			Dimensions:  []string{},
+		},
+	}
+}
+
+// GetCacheMetrics returns definitions for cache system metrics
+func GetCacheMetrics() []MetricDefinition {
+	return []MetricDefinition{
+		// Redis specific
+		{
+			Name:        "redis.commands.processed",
+			Description: "Total commands processed",
+			Unit:        "{commands}",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"redis.role"},
+		},
+		{
+			Name:        "redis.commands.latency",
+			Description: "Command latency",
+			Unit:        "ms",
+			Type:        MetricTypeHistogram,
+			Dimensions:  []string{"redis.command"},
+		},
+		{
+			Name:        "redis.memory.used",
+			Description: "Memory used by Redis",
+			Unit:        "By",
+			Type:        MetricTypeGauge,
+			Dimensions:  []string{"redis.role"},
+		},
+		{
+			Name:        "redis.memory.peak",
+			Description: "Peak memory used",
+			Unit:        "By",
+			Type:        MetricTypeGauge,
+			Dimensions:  []string{"redis.role"},
+		},
+		{
+			Name:        "redis.keys.evicted",
+			Description: "Keys evicted due to maxmemory",
+			Unit:        "{keys}",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"redis.role"},
+		},
+		{
+			Name:        "redis.keys.expired",
+			Description: "Keys expired",
+			Unit:        "{keys}",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"redis.role"},
+		},
+		{
+			Name:        "redis.connections.active",
+			Description: "Active client connections",
+			Unit:        "{connections}",
+			Type:        MetricTypeGauge,
+			Dimensions:  []string{"redis.role"},
+		},
+		{
+			Name:        "redis.connections.rejected",
+			Description: "Connections rejected due to maxclients",
+			Unit:        "{connections}",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"redis.role"},
+		},
+		{
+			Name:        "redis.keyspace.hits",
+			Description: "Keyspace hits",
+			Unit:        "{hits}",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"redis.role"},
+		},
+		{
+			Name:        "redis.keyspace.misses",
+			Description: "Keyspace misses",
+			Unit:        "{misses}",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"redis.role"},
+		},
+		{
+			Name:        "redis.replication.offset",
+			Description: "Replication offset",
+			Unit:        "{offset}",
+			Type:        MetricTypeGauge,
+			Dimensions:  []string{"redis.role"},
+		},
+		{
+			Name:        "redis.replication.lag",
+			Description: "Replication lag in seconds",
+			Unit:        "s",
+			Type:        MetricTypeGauge,
+			Dimensions:  []string{"redis.role"},
+		},
+	}
+}
+
+// GetBrowserMetrics returns definitions for browser/RUM metrics
+func GetBrowserMetrics() []MetricDefinition {
+	return []MetricDefinition{
+		// Core Web Vitals
+		{
+			Name:        "browser.web_vital.lcp",
+			Description: "Largest Contentful Paint",
+			Unit:        "ms",
+			Type:        MetricTypeHistogram,
+			Dimensions:  []string{"page.url", "user_agent.browser"},
+		},
+		{
+			Name:        "browser.web_vital.fid",
+			Description: "First Input Delay",
+			Unit:        "ms",
+			Type:        MetricTypeHistogram,
+			Dimensions:  []string{"page.url", "user_agent.browser"},
+		},
+		{
+			Name:        "browser.web_vital.cls",
+			Description: "Cumulative Layout Shift",
+			Unit:        "{score}",
+			Type:        MetricTypeHistogram,
+			Dimensions:  []string{"page.url", "user_agent.browser"},
+		},
+		{
+			Name:        "browser.web_vital.fcp",
+			Description: "First Contentful Paint",
+			Unit:        "ms",
+			Type:        MetricTypeHistogram,
+			Dimensions:  []string{"page.url", "user_agent.browser"},
+		},
+		{
+			Name:        "browser.web_vital.ttfb",
+			Description: "Time to First Byte",
+			Unit:        "ms",
+			Type:        MetricTypeHistogram,
+			Dimensions:  []string{"page.url", "user_agent.browser"},
+		},
+		{
+			Name:        "browser.web_vital.inp",
+			Description: "Interaction to Next Paint",
+			Unit:        "ms",
+			Type:        MetricTypeHistogram,
+			Dimensions:  []string{"page.url", "user_agent.browser"},
+		},
+		// Resource timing
+		{
+			Name:        "browser.resource.duration",
+			Description: "Resource load duration",
+			Unit:        "ms",
+			Type:        MetricTypeHistogram,
+			Dimensions:  []string{"resource.type", "http.status_code"},
+		},
+		{
+			Name:        "browser.resource.size",
+			Description: "Resource transfer size",
+			Unit:        "By",
+			Type:        MetricTypeHistogram,
+			Dimensions:  []string{"resource.type"},
+		},
+		// Page load timing
+		{
+			Name:        "browser.page.load_time",
+			Description: "Page load time",
+			Unit:        "ms",
+			Type:        MetricTypeHistogram,
+			Dimensions:  []string{"page.url"},
+		},
+		{
+			Name:        "browser.page.dom_content_loaded",
+			Description: "DOMContentLoaded event timing",
+			Unit:        "ms",
+			Type:        MetricTypeHistogram,
+			Dimensions:  []string{"page.url"},
+		},
+		// User interactions
+		{
+			Name:        "browser.interaction.duration",
+			Description: "User interaction duration",
+			Unit:        "ms",
+			Type:        MetricTypeHistogram,
+			Dimensions:  []string{"interaction.type"},
+		},
+		{
+			Name:        "browser.error.count",
+			Description: "JavaScript errors",
+			Unit:        "{errors}",
+			Type:        MetricTypeSum,
+			Dimensions:  []string{"error.type", "page.url"},
+		},
+	}
+}
+
 // GetMetricsByType returns metric definitions for a given type
 func GetMetricsByType(metricType string) []MetricDefinition {
 	switch metricType {
@@ -1198,6 +1573,14 @@ func GetMetricsByType(metricType string) []MetricDefinition {
 		return GetOTelCollectorMetrics()
 	case "aspnet_metrics":
 		return GetASPNETMetrics()
+	case "aws_metrics":
+		return GetAWSMetrics()
+	case "v8_metrics":
+		return GetV8Metrics()
+	case "cache_metrics":
+		return GetCacheMetrics()
+	case "browser_metrics":
+		return GetBrowserMetrics()
 	default:
 		return []MetricDefinition{}
 	}
@@ -1335,6 +1718,20 @@ func (d *MetricDefinition) GetValueRange() (float64, float64) {
 		return 0, 1000
 	case d.Unit == "{attempts}":
 		return 0, 10000
+	case d.Unit == "{keys}":
+		return 0, 1000000
+	case d.Unit == "{hits}" || d.Unit == "{misses}":
+		return 0, 1000000
+	case d.Unit == "{offset}":
+		return 0, 1e9
+	case d.Unit == "{commands}":
+		return 0, 1000000
+	case d.Unit == "{failures}":
+		return 0, 100
+	case d.Unit == "{score}":
+		return 0.0, 1.0
+	case d.Unit == "{errors}":
+		return 0, 1000
 
 	// K8s specific
 	case d.Name == "k8s.container.restarts":

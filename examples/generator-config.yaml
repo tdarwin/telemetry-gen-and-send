@@ -74,6 +74,10 @@ metrics:
     - messaging_metrics # Kafka consumer metrics
     - otelcol_metrics # OpenTelemetry Collector receiver/processor/exporter metrics
     - aspnet_metrics # ASP.NET Core / Kestrel web server metrics
+    - aws_metrics # AWS CloudWatch EC2, EBS, network, status checks
+    - v8_metrics # V8 JavaScript engine heap, GC metrics
+    - cache_metrics # Redis commands, memory, keyspace, replication
+    - browser_metrics # Core Web Vitals, resource timing, page load, user interactions
 
 logs:
   # Number of log templates to generate
