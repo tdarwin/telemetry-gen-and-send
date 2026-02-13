@@ -7,23 +7,24 @@ output:
 
 traces:
   # Number of trace templates to generate
-  count: 100
+  count: 10_000
 
   spans:
     # Average number of spans per trace (will use normal distribution)
-    avg_per_trace: 15
+    avg_per_trace: 50
     # Standard deviation for span count distribution
-    std_dev: 5
+    std_dev: 15
 
     # Optional: Generate some traces with very high span counts
+    # Note: Large traces are automatically split across multiple batches by the sender
     high_span_traces:
       enabled: true
-      count: 2
-      span_count: 1000
+      count: 5
+      span_count: 100_000 # Sender will split into multiple batches
 
   services:
     # Number of services in your topology
-    count: 5
+    count: 10
     # Service names (optional - will auto-generate if not provided)
     names:
       - "api-gateway"
@@ -31,20 +32,25 @@ traces:
       - "order-service"
       - "payment-service"
       - "inventory-service"
+      - "authentication-service"
+      - "easter-egg-service"
+      - "cache-service"
+      - "coupon-service"
+      - "ads-service"
 
     ingress:
       # true = single ingress service, false = multiple ingress services
-      single: true
+      single: false
       # Which service is the ingress (only used if single=true)
-      service: "api-gateway"
+      # service: "api-gateway"
 
   custom_attributes:
     # Number of custom attributes to randomly add to spans
-    count: 10
+    count: 30
 
 metrics:
   # Number of distinct metric names to generate
-  metric_count: 50
+  metric_count: 500
 
   # Time series per metric
   timeseries_per_metric:
@@ -54,15 +60,15 @@ metrics:
 
   # Types of metrics to generate
   types:
-    - host_metrics      # CPU, memory, disk, network
-    - k8s_cluster       # Cluster-level metrics
-    - k8s_node          # Node-level metrics
-    - k8s_pod           # Pod-level metrics
-    - k8s_container     # Container-level metrics
+    - host_metrics # CPU, memory, disk, network
+    - k8s_cluster # Cluster-level metrics
+    - k8s_node # Node-level metrics
+    - k8s_pod # Pod-level metrics
+    - k8s_container # Container-level metrics
 
 logs:
   # Number of log templates to generate
-  count: 1000
+  count: 50000
 
   types:
     # HTTP access logs
@@ -72,7 +78,7 @@ logs:
     # Application logs (DEBUG, INFO, WARN, ERROR)
     application:
       percentage: 40
-      services: 5  # Number of application services
+      services: 5 # Number of application services
 
     # System logs (startup, shutdown, alerts, etc.)
     system:

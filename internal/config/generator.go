@@ -126,6 +126,49 @@ func LoadGeneratorConfig(path string) (*GeneratorConfig, error) {
 	return &config, nil
 }
 
+// Memory estimation constants (approximate bytes per object in memory)
+const (
+	// Traces: Each span in memory is ~2KB (protobuf overhead, IDs, attributes, etc.)
+	bytesPerSpan = 2048
+
+	// Metrics: Each data point is ~400 bytes
+	bytesPerMetricDataPoint = 400
+
+	// Logs: Each log record is ~800 bytes
+	bytesPerLogRecord = 800
+
+	// Maximum memory usage for sender (10GB limit)
+	maxMemoryBytes = 10 * 1024 * 1024 * 1024 // 10GB
+)
+
+// EstimateMemoryUsage calculates the approximate memory usage in bytes for the sender
+func (c *GeneratorConfig) EstimateMemoryUsage() int64 {
+	var totalBytes int64
+
+	// Calculate trace span memory
+	normalTraceSpans := c.Traces.Count * c.Traces.Spans.AvgPerTrace
+	highSpanTraceSpans := 0
+	if c.Traces.Spans.HighSpanTraces.Enabled {
+		highSpanTraceSpans = c.Traces.Spans.HighSpanTraces.Count * c.Traces.Spans.HighSpanTraces.SpanCount
+	}
+	totalSpans := normalTraceSpans + highSpanTraceSpans
+	totalBytes += int64(totalSpans) * bytesPerSpan
+
+	// Calculate metric data point memory
+	// Use average of min and max for estimation
+	avgTimeSeries := (c.Metrics.TimeSeriesPerMetric.Min + c.Metrics.TimeSeriesPerMetric.Max) / 2
+	if c.Metrics.TimeSeriesPerMetric.Default > 0 {
+		avgTimeSeries = c.Metrics.TimeSeriesPerMetric.Default
+	}
+	totalDataPoints := c.Metrics.MetricCount * avgTimeSeries
+	totalBytes += int64(totalDataPoints) * bytesPerMetricDataPoint
+
+	// Calculate log record memory
+	totalBytes += int64(c.Logs.Count) * bytesPerLogRecord
+
+	return totalBytes
+}
+
 // Validate checks if the configuration is valid
 func (c *GeneratorConfig) Validate() error {
 	if c.Output.Directory == "" {
@@ -173,6 +216,16 @@ func (c *GeneratorConfig) Validate() error {
 		c.Logs.Types.System.Percentage
 	if totalLogPercentage != 100 {
 		return fmt.Errorf("log type percentages must sum to 100, got %d", totalLogPercentage)
+	}
+
+	// Validate memory usage doesn't exceed 10GB limit
+	estimatedMemory := c.EstimateMemoryUsage()
+	if estimatedMemory > maxMemoryBytes {
+		memoryGB := float64(estimatedMemory) / (1024 * 1024 * 1024)
+		maxGB := float64(maxMemoryBytes) / (1024 * 1024 * 1024)
+		return fmt.Errorf("estimated sender memory usage (%.2f GB) exceeds maximum (%.0f GB). "+
+			"Reduce trace count, spans per trace, high-span traces, metrics, or logs. "+
+			"See documentation for memory calculation details", memoryGB, maxGB)
 	}
 
 	return nil

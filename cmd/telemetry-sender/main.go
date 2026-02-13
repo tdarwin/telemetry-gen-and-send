@@ -141,11 +141,24 @@ func main() {
 		idRegenerator,
 		rateLimiter,
 		reporter,
+		cfg.Sending.BatchSize.Traces,
+		cfg.Sending.BatchSize.Metrics,
+		cfg.Sending.BatchSize.Logs,
 	)
 
 	// Start sending
 	fmt.Println("═══════════════════════════════════════════════════════════")
 	fmt.Printf("Starting %d worker(s)...\n", cfg.Sending.Concurrency)
+	fmt.Printf("  Trace workers: %d\n", pool.TraceWorkers)
+	fmt.Printf("  Metrics workers: %d\n", pool.MetricsWorkers)
+	fmt.Printf("  Logs workers: %d\n", pool.LogsWorkers)
+
+	// Show batch information
+	if templates.Traces != nil && len(templates.Traces.ResourceSpans) > 0 {
+		numBatches := (len(templates.Traces.ResourceSpans) + cfg.Sending.BatchSize.Traces - 1) / cfg.Sending.BatchSize.Traces
+		fmt.Printf("  Trace batches: %d (batch size: %d resource spans)\n", numBatches, cfg.Sending.BatchSize.Traces)
+	}
+
 	fmt.Println("Sending telemetry...")
 	fmt.Println()
 

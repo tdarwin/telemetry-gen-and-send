@@ -45,6 +45,14 @@ func main() {
 	fmt.Printf("Output directory: %s\n", cfg.Output.Directory)
 	fmt.Printf("Output prefix: %s\n", cfg.Output.Prefix)
 	fmt.Printf("JSON output: %v\n", *jsonOutput)
+
+	// Show estimated sender memory usage
+	estimatedMemory := cfg.EstimateMemoryUsage()
+	memoryGB := float64(estimatedMemory) / (1024 * 1024 * 1024)
+	fmt.Printf("Estimated sender memory: %.2f GB\n", memoryGB)
+	if memoryGB > 8.0 {
+		fmt.Printf("  ⚠️  High memory usage - consider reducing dataset size\n")
+	}
 	fmt.Println()
 
 	startTime := time.Now()

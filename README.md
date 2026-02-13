@@ -320,13 +320,18 @@ Examples:
 - Generates 2,000 metrics (600k time series) in ~500ms
 - Generates 50,000 logs in ~200ms
 - Total: ~2MB of telemetry data in under 1 second
+- **Memory validation**: Prevents generating datasets >10GB
 
 ### Sender
 - Configurable throughput with rate limiting
 - Target: 1M+ events/second per instance with tuning
 - Concurrent workers for high throughput
 - Real-time statistics reporting
+- **Intelligent batching**: Span-count-aware batching (max 10k spans/batch)
+- **Memory limit**: 10GB maximum dataset size
 - Resource efficient design
+
+See [MEMORY_LIMITS.md](./MEMORY_LIMITS.md) for detailed memory usage guidelines and performance tips.
 
 ## Development
 

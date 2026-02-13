@@ -28,7 +28,8 @@ sending:
 
   batch_size:
     # Number of traces to send per batch
-    traces: 3000
+    # Note: Batches are also limited to 10,000 spans max for gRPC message size
+    traces: 100
     # Number of metric data points to send per batch
     metrics: 100
     # Number of log records to send per batch
@@ -38,7 +39,7 @@ sending:
   # Higher values = more throughput but more CPU/memory usage
   # Each worker processes telemetry in parallel
   # The rate_limit acts as a global throttle across all workers
-  concurrency: 10
+  concurrency: 30
 
   # How long to send data (maximum time limit)
   # Use Go duration format: "10m", "1h", "30s"
