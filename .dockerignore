@@ -1,0 +1,40 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts
+build/
+bin/
+*.exe
+*.test
+*.out
+
+# Generated telemetry
+generated/
+*.pb
+*.json
+*-metadata.yaml
+
+# IDE and editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Documentation
+*.md
+!README.md
+
+# CI/CD
+.github/
+
+# Environment and config
+.env
+.env.local
+
+# Logs and temp
+*.log
+tmp/
+*.tmp

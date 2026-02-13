@@ -1,0 +1,70 @@
+# Telemetry Sender Configuration Example
+# This file controls how telemetry is sent to OTLP endpoints
+
+input:
+  # Paths to generated telemetry files
+  traces: "./generated/telemetry-traces.pb"
+  metrics: "./generated/telemetry-metrics.pb"
+  logs: "./generated/telemetry-logs.pb"
+
+otlp:
+  # OTLP endpoint (gRPC)
+  endpoint: "api.honeycomb.io:443"
+
+  # Headers to include with requests
+  # Use ${ENV_VAR} syntax for environment variable substitution
+  headers:
+    x-honeycomb-team: "${HONEYCOMB_API_KEY}"
+    # x-honeycomb-dataset: "telemetry-test"  # Optional
+
+  # Set to true for insecure connections (e.g., localhost testing)
+  insecure: false
+
+sending:
+  rate_limit:
+    # Target throughput in events per second
+    # (traces = spans, metrics = data points, logs = log records)
+    events_per_second: 100000
+
+  batch_size:
+    # Number of traces to send per batch
+    traces: 3000
+    # Number of metric data points to send per batch
+    metrics: 100
+    # Number of log records to send per batch
+    logs: 200
+
+  # Number of concurrent worker goroutines
+  # Higher values = more throughput but more CPU/memory usage
+  # Each worker processes telemetry in parallel
+  # The rate_limit acts as a global throttle across all workers
+  concurrency: 10
+
+  # How long to send data (maximum time limit)
+  # Use Go duration format: "10m", "1h", "30s"
+  # Use "0" for no time limit
+  duration: "2m"
+
+  # How many times to replay the templates
+  # Set to 0 for infinite replay
+  multiplier: 0
+
+  # NOTE: The sender stops when EITHER:
+  #   - All multiplier iterations complete, OR
+  #   - The duration time expires (whichever comes first)
+  #
+  # Examples:
+  #   duration: "5m", multiplier: 10  → Stops after 10 replays OR 5 min - whichever comes first
+  #   duration: "5m", multiplier: 0   → Runs for exactly 5 minutes
+  #   duration: "0",  multiplier: 10  → Runs until 10 replays complete
+  #   duration: "0",  multiplier: 0   → Runs indefinitely (Ctrl+C to stop)
+
+timestamps:
+  # Random jitter to add to timestamps (in milliseconds)
+  # This spreads events across time for more realistic patterns
+  jitter_ms: 1000
+
+  # How far back to set timestamps (in milliseconds)
+  # Use 0 for current time
+  # Useful for backfilling historical data
+  backdate_ms: 0

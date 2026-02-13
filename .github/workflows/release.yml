@@ -1,0 +1,188 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-binaries:
+    name: Build Release Binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Build binaries
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          # Build generator
+          go build -ldflags "-X main.Version=${VERSION}" \
+            -o telemetry-generator-${GOOS}-${GOARCH}$([[ "$GOOS" == "windows" ]] && echo ".exe" || echo "") \
+            ./cmd/telemetry-generator
+
+          # Build sender
+          go build -ldflags "-X main.Version=${VERSION}" \
+            -o telemetry-sender-${GOOS}-${GOARCH}$([[ "$GOOS" == "windows" ]] && echo ".exe" || echo "") \
+            ./cmd/telemetry-sender
+
+      - name: Create archives
+        run: |
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            zip telemetry-tools-${{ steps.version.outputs.VERSION }}-${{ matrix.goos }}-${{ matrix.goarch }}.zip \
+              telemetry-generator-${{ matrix.goos }}-${{ matrix.goarch }}.exe \
+              telemetry-sender-${{ matrix.goos }}-${{ matrix.goarch }}.exe \
+              README.md
+          else
+            tar czf telemetry-tools-${{ steps.version.outputs.VERSION }}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz \
+              telemetry-generator-${{ matrix.goos }}-${{ matrix.goarch }} \
+              telemetry-sender-${{ matrix.goos }}-${{ matrix.goarch }} \
+              README.md
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            *.tar.gz
+            *.zip
+
+  create-release:
+    name: Create GitHub Release
+    needs: build-binaries
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          cat > release_notes.md << EOF
+          ## Telemetry Generator and Sender v${{ steps.version.outputs.VERSION }}
+
+          High-performance telemetry generation and load testing tools for OpenTelemetry.
+
+          ### Downloads
+
+          Download the appropriate archive for your platform below:
+
+          - **Linux AMD64**: \`telemetry-tools-${{ steps.version.outputs.VERSION }}-linux-amd64.tar.gz\`
+          - **Linux ARM64**: \`telemetry-tools-${{ steps.version.outputs.VERSION }}-linux-arm64.tar.gz\`
+          - **macOS Intel**: \`telemetry-tools-${{ steps.version.outputs.VERSION }}-darwin-amd64.tar.gz\`
+          - **macOS Apple Silicon**: \`telemetry-tools-${{ steps.version.outputs.VERSION }}-darwin-arm64.tar.gz\`
+          - **Windows AMD64**: \`telemetry-tools-${{ steps.version.outputs.VERSION }}-windows-amd64.zip\`
+
+          ### Docker Image
+
+          \`\`\`bash
+          docker pull ghcr.io/${{ github.repository }}:${{ steps.version.outputs.VERSION }}
+          docker pull ghcr.io/${{ github.repository }}:latest
+          \`\`\`
+
+          ### What's Included
+
+          - \`telemetry-generator\` - Generate OpenTelemetry traces, metrics, and logs
+          - \`telemetry-sender\` - Send generated telemetry to OTLP endpoints at high volume
+
+          See [README.md](https://github.com/${{ github.repository }}/blob/main/README.md) for usage instructions.
+          EOF
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-and-push-docker:
+    name: Build and Push Docker Image
+    needs: create-release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
