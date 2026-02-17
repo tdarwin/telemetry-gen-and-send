@@ -14,10 +14,11 @@ Do not make assumptions about business logic or system behavior.
 
 ## Overview
 
-This is a monorepo containing many Go services (in cmd/ and services/), and a TypeScript React frontend (in cmd/poodle).
+This is a monorepo containing two Go services (in cmd/ and internal/)
 
 - When developing in Go code, you MUST read .agents/go.md for instructions.
-- When developing in React, you MUST read .agents/react.md for instructions.
+- When asked to work on the codebase load the ARCHITECTURE.md in for context
+- If the codebase is updated in such a way that changes or adds to the architecture, update the ARCHITECTURE.md file.
 
 ## Verification Test
 
