@@ -174,51 +174,66 @@ func (c *GeneratorConfig) Validate() error {
 		return fmt.Errorf("output.directory is required")
 	}
 
+	// Check for negative counts
 	if c.Traces.Count < 0 {
 		return fmt.Errorf("traces.count must be non-negative")
-	}
-
-	if c.Traces.Spans.AvgPerTrace < 1 {
-		return fmt.Errorf("traces.spans.avg_per_trace must be at least 1")
-	}
-
-	if c.Traces.Spans.StdDev < 0 {
-		return fmt.Errorf("traces.spans.std_dev must be non-negative")
-	}
-
-	if c.Traces.Services.Count < 1 {
-		return fmt.Errorf("traces.services.count must be at least 1")
-	}
-
-	if len(c.Traces.Services.Names) > 0 && len(c.Traces.Services.Names) != c.Traces.Services.Count {
-		return fmt.Errorf("traces.services.names length must match traces.services.count")
 	}
 
 	if c.Metrics.MetricCount < 0 {
 		return fmt.Errorf("metrics.metric_count must be non-negative")
 	}
 
-	if c.Metrics.MetricCount > 200 {
-		return fmt.Errorf("metrics.metric_count must not exceed 200 (requested: %d)", c.Metrics.MetricCount)
-	}
-
-	if c.Metrics.TimeSeriesPerMetric.Min < 1 {
-		return fmt.Errorf("metrics.timeseries_per_metric.min must be at least 1")
-	}
-
-	if c.Metrics.TimeSeriesPerMetric.Max < c.Metrics.TimeSeriesPerMetric.Min {
-		return fmt.Errorf("metrics.timeseries_per_metric.max must be >= min")
-	}
-
 	if c.Logs.Count < 0 {
 		return fmt.Errorf("logs.count must be non-negative")
 	}
 
-	totalLogPercentage := c.Logs.Types.HTTPAccess.Percentage +
-		c.Logs.Types.Application.Percentage +
-		c.Logs.Types.System.Percentage
-	if totalLogPercentage != 100 {
-		return fmt.Errorf("log type percentages must sum to 100, got %d", totalLogPercentage)
+	// Ensure at least one telemetry type is enabled
+	if c.Traces.Count == 0 && c.Metrics.MetricCount == 0 && c.Logs.Count == 0 {
+		return fmt.Errorf("at least one telemetry type must be enabled (traces.count, metrics.metric_count, or logs.count must be > 0)")
+	}
+
+	// Only validate trace configuration if traces are enabled
+	if c.Traces.Count > 0 {
+		if c.Traces.Spans.AvgPerTrace < 1 {
+			return fmt.Errorf("traces.spans.avg_per_trace must be at least 1")
+		}
+
+		if c.Traces.Spans.StdDev < 0 {
+			return fmt.Errorf("traces.spans.std_dev must be non-negative")
+		}
+
+		if c.Traces.Services.Count < 1 {
+			return fmt.Errorf("traces.services.count must be at least 1")
+		}
+
+		if len(c.Traces.Services.Names) > 0 && len(c.Traces.Services.Names) != c.Traces.Services.Count {
+			return fmt.Errorf("traces.services.names length must match traces.services.count")
+		}
+	}
+
+	// Only validate metrics configuration if metrics are enabled
+	if c.Metrics.MetricCount > 0 {
+		if c.Metrics.MetricCount > 200 {
+			return fmt.Errorf("metrics.metric_count must not exceed 200 (requested: %d)", c.Metrics.MetricCount)
+		}
+
+		if c.Metrics.TimeSeriesPerMetric.Min < 1 {
+			return fmt.Errorf("metrics.timeseries_per_metric.min must be at least 1")
+		}
+
+		if c.Metrics.TimeSeriesPerMetric.Max < c.Metrics.TimeSeriesPerMetric.Min {
+			return fmt.Errorf("metrics.timeseries_per_metric.max must be >= min")
+		}
+	}
+
+	// Only validate log configuration if logs are enabled
+	if c.Logs.Count > 0 {
+		totalLogPercentage := c.Logs.Types.HTTPAccess.Percentage +
+			c.Logs.Types.Application.Percentage +
+			c.Logs.Types.System.Percentage
+		if totalLogPercentage != 100 {
+			return fmt.Errorf("log type percentages must sum to 100, got %d", totalLogPercentage)
+		}
 	}
 
 	// Validate memory usage doesn't exceed 10GB limit
@@ -240,20 +255,24 @@ func (c *GeneratorConfig) ApplyDefaults() {
 		c.Output.Prefix = "telemetry"
 	}
 
-	if c.Metrics.TimeSeriesPerMetric.Default == 0 {
+	// Only apply metrics defaults if metrics are enabled
+	if c.Metrics.MetricCount > 0 && c.Metrics.TimeSeriesPerMetric.Default == 0 {
 		c.Metrics.TimeSeriesPerMetric.Default = 300
 	}
 
-	// Generate service names if not provided
-	if len(c.Traces.Services.Names) == 0 {
-		c.Traces.Services.Names = make([]string, c.Traces.Services.Count)
-		for i := 0; i < c.Traces.Services.Count; i++ {
-			c.Traces.Services.Names[i] = fmt.Sprintf("service-%d", i+1)
+	// Only apply trace defaults if traces are enabled
+	if c.Traces.Count > 0 {
+		// Generate service names if not provided
+		if len(c.Traces.Services.Names) == 0 {
+			c.Traces.Services.Names = make([]string, c.Traces.Services.Count)
+			for i := 0; i < c.Traces.Services.Count; i++ {
+				c.Traces.Services.Names[i] = fmt.Sprintf("service-%d", i+1)
+			}
 		}
-	}
 
-	// Set default ingress if single ingress and service not specified
-	if c.Traces.Services.Ingress.Single && c.Traces.Services.Ingress.Service == "" {
-		c.Traces.Services.Ingress.Service = c.Traces.Services.Names[0]
+		// Set default ingress if single ingress and service not specified
+		if c.Traces.Services.Ingress.Single && c.Traces.Services.Ingress.Service == "" {
+			c.Traces.Services.Ingress.Service = c.Traces.Services.Names[0]
+		}
 	}
 }

@@ -1,12 +1,18 @@
 # Telemetry Generator Configuration Example
 # This file controls what telemetry is generated
+#
+# Note: You can disable any telemetry type by setting its count to 0:
+# - Set traces.count: 0 to skip trace generation
+# - Set metrics.metric_count: 0 to skip metrics generation
+# - Set logs.count: 0 to skip log generation
+# At least one type must be enabled (count > 0)
 
 output:
   directory: "./generated"
   prefix: "telemetry"
 
 traces:
-  # Number of trace templates to generate
+  # Number of trace templates to generate (set to 0 to disable traces)
   count: 10_000
 
   spans:
@@ -49,7 +55,7 @@ traces:
     count: 30
 
 metrics:
-  # Number of distinct metric names to generate (max: 200)
+  # Number of distinct metric names to generate (max: 200, set to 0 to disable metrics)
   # The generator will randomly select from all available metric types
   # including host, K8s, JVM, HTTP, database, RPC, runtime, messaging,
   # OTel collector, ASP.NET, AWS, V8, cache, and browser metrics
@@ -62,7 +68,7 @@ metrics:
     default: 300
 
 logs:
-  # Number of log templates to generate
+  # Number of log templates to generate (set to 0 to disable logs)
   count: 50000
 
   types:
