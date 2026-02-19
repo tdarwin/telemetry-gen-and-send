@@ -30,15 +30,12 @@ RUN addgroup -g 1000 telemetry && \
     adduser -D -u 1000 -G telemetry telemetry
 
 # Create directories
-RUN mkdir -p /data /config && \
+RUN mkdir -p /data /config/ && \
     chown -R telemetry:telemetry /data /config
 
 # Copy binaries from builder
 COPY --from=builder /telemetry-generator /usr/local/bin/telemetry-generator
 COPY --from=builder /telemetry-sender /usr/local/bin/telemetry-sender
-
-# Copy example configs
-COPY --chown=telemetry:telemetry examples/ /config/examples/
 
 # Switch to non-root user
 USER telemetry
