@@ -256,6 +256,10 @@ func (g *SpanGenerator) generateAttributes(service *ServiceNode, op Operation) [
 	// Add service name
 	attrs = append(attrs, common.CreateStringAttribute("service.name", service.Name))
 
+	if service.Namespace != "" {
+		attrs = append(attrs, common.CreateStringAttribute("service.namespace", service.Namespace))
+	}
+
 	// Add operation-specific attributes
 	switch op.Type {
 	case OperationTypeHTTP:

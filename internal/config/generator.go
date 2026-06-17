@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -45,9 +46,15 @@ type HighSpanTraces struct {
 
 // ServicesConfig configures service topology
 type ServicesConfig struct {
-	Count   int          `yaml:"count"`
-	Names   []string     `yaml:"names"`
-	Ingress IngressConfig `yaml:"ingress"`
+	Count                int               `yaml:"count"`
+	Names                []string          `yaml:"names"`
+	Ingress              IngressConfig     `yaml:"ingress"`
+	Namespaces           []string          `yaml:"namespaces"`
+	NamespaceAssignments map[string]string `yaml:"namespace_assignments"`
+
+	// ResolvedNamespaces is the final service-name → namespace map used during
+	// trace generation. Populated by ApplyDefaults; not unmarshaled from YAML.
+	ResolvedNamespaces map[string]string `yaml:"-"`
 }
 
 // IngressConfig configures ingress service(s)
@@ -209,6 +216,10 @@ func (c *GeneratorConfig) Validate() error {
 		if len(c.Traces.Services.Names) > 0 && len(c.Traces.Services.Names) != c.Traces.Services.Count {
 			return fmt.Errorf("traces.services.names length must match traces.services.count")
 		}
+
+		if err := c.validateNamespaceConfig(); err != nil {
+			return err
+		}
 	}
 
 	// Only validate metrics configuration if metrics are enabled
@@ -274,5 +285,67 @@ func (c *GeneratorConfig) ApplyDefaults() {
 		if c.Traces.Services.Ingress.Single && c.Traces.Services.Ingress.Service == "" {
 			c.Traces.Services.Ingress.Service = c.Traces.Services.Names[0]
 		}
+
+		c.resolveServiceNamespaces()
 	}
+}
+
+// validateNamespaceConfig checks that namespace_assignments only reference
+// known services, and (when a namespaces list is provided) only reference
+// namespace values declared in it.
+func (c *GeneratorConfig) validateNamespaceConfig() error {
+	svc := c.Traces.Services
+	if len(svc.NamespaceAssignments) == 0 {
+		return nil
+	}
+
+	knownServices := make(map[string]struct{}, len(svc.Names))
+	for _, name := range svc.Names {
+		knownServices[name] = struct{}{}
+	}
+
+	knownNamespaces := make(map[string]struct{}, len(svc.Namespaces))
+	for _, ns := range svc.Namespaces {
+		knownNamespaces[ns] = struct{}{}
+	}
+
+	for service, namespace := range svc.NamespaceAssignments {
+		if _, ok := knownServices[service]; !ok {
+			return fmt.Errorf("traces.services.namespace_assignments references unknown service %q (must appear in traces.services.names)", service)
+		}
+		if len(svc.Namespaces) > 0 {
+			if _, ok := knownNamespaces[namespace]; !ok {
+				return fmt.Errorf("traces.services.namespace_assignments value %q for service %q must appear in traces.services.namespaces", namespace, service)
+			}
+		}
+	}
+
+	return nil
+}
+
+// resolveServiceNamespaces builds the final service-name → namespace map.
+// Explicit assignments win; remaining services are distributed round-robin
+// across the namespaces list in Names order so the same config always yields
+// the same mapping.
+func (c *GeneratorConfig) resolveServiceNamespaces() {
+	svc := &c.Traces.Services
+	if len(svc.Namespaces) == 0 && len(svc.NamespaceAssignments) == 0 {
+		return
+	}
+
+	resolved := make(map[string]string, len(svc.Names))
+	maps.Copy(resolved, svc.NamespaceAssignments)
+
+	if len(svc.Namespaces) > 0 {
+		unassignedIdx := 0
+		for _, name := range svc.Names {
+			if _, ok := resolved[name]; ok {
+				continue
+			}
+			resolved[name] = svc.Namespaces[unassignedIdx%len(svc.Namespaces)]
+			unassignedIdx++
+		}
+	}
+
+	svc.ResolvedNamespaces = resolved
 }

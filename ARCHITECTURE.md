@@ -207,6 +207,7 @@ type ServiceTopology struct {
 
 type ServiceNode struct {
     Name       string
+    Namespace  string              // Optional service.namespace value
     IsIngress  bool
     Operations []Operation        // HTTP, DB, Internal ops
     Downstream []*ServiceNode     // Services this can call
@@ -257,6 +258,16 @@ flowchart TD
 - `buildSpanTree()`: Recursively builds span hierarchy (depth-first)
 - `calculateDurations()`: Bottom-up calculation of span durations
 - `generateAttributes()`: Creates OpenTelemetry semantic attributes
+
+**Service Namespace Mapping**:
+
+When `traces.services.namespaces` or `traces.services.namespace_assignments` is set, the generator emits a `service.namespace` attribute on every span. The final service-name → namespace map is resolved once in `config.GeneratorConfig.ApplyDefaults` and stored on `ServicesConfig.ResolvedNamespaces`:
+
+1. Explicit `namespace_assignments` entries are applied first.
+2. Any service in `Names` not covered by an explicit assignment is distributed round-robin across the `namespaces` list, iterated in `Names` order — so the mapping is deterministic and stays consistent across an entire generation run.
+3. If only `namespace_assignments` is provided (no `namespaces` list), services not listed there get no `service.namespace` attribute.
+
+The map is passed into `BuildTopology` and stored on each `ServiceNode.Namespace`. `generateAttributes` emits the attribute alongside `service.name` whenever `Namespace != ""`. The attribute lives on the span (not the OTLP `Resource`) for the same reason `service.name` does: each generated trace puts spans from multiple services into one `ResourceSpans` block, so per-service metadata must travel on the spans themselves.
 
 #### 3. Metrics Generator (`internal/generator/metrics/`)
 
@@ -724,6 +735,11 @@ traces:
   services:
     count: 5
     names: ["api", "db", "cache"]
+    # Optional — emits service.namespace on every span using a deterministic
+    # service → namespace mapping that stays consistent across the run.
+    namespaces: ["frontend", "backend"]
+    namespace_assignments:
+      api: "frontend"
 
 metrics:
   metric_count: 2000

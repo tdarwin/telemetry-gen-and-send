@@ -20,6 +20,7 @@ func NewGenerator(cfg *config.TracesConfig, outputDir, prefix string) *Generator
 		cfg.Services.Names,
 		cfg.Services.Ingress.Single,
 		cfg.Services.Ingress.Service,
+		cfg.Services.ResolvedNamespaces,
 	)
 
 	spanGen := NewSpanGenerator(cfg, topology)
