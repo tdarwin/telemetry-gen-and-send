@@ -50,6 +50,23 @@ traces:
       # Which service is the ingress (only used if single=true)
       # service: "api-gateway"
 
+    # Optional: emit a service.namespace attribute on every span.
+    # Services are distributed round-robin across this list in the order of
+    # `names`, so the mapping is deterministic and stays consistent for the
+    # whole run (the same service.name always pairs with the same
+    # service.namespace). Omit this section entirely to skip the attribute.
+    # namespaces:
+    #   - "frontend"
+    #   - "backend"
+    #   - "platform"
+
+    # Optional: pin specific services to specific namespaces. Explicit
+    # assignments win over the round-robin distribution above. If `namespaces`
+    # is omitted, only services listed here get a service.namespace attribute.
+    # namespace_assignments:
+    #   api-gateway: "frontend"
+    #   user-service: "backend"
+
   custom_attributes:
     # Number of custom attributes to randomly add to spans
     count: 30

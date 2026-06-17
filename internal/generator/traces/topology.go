@@ -15,10 +15,11 @@ const (
 
 // ServiceNode represents a service in the topology
 type ServiceNode struct {
-	Name          string
-	IsIngress     bool
-	Operations    []Operation
-	Downstream    []*ServiceNode
+	Name       string
+	Namespace  string
+	IsIngress  bool
+	Operations []Operation
+	Downstream []*ServiceNode
 }
 
 // Operation represents an operation that a service can perform
@@ -41,8 +42,10 @@ type ServiceTopology struct {
 	IngressServices []*ServiceNode
 }
 
-// BuildTopology builds a service topology from service names and configuration
-func BuildTopology(serviceNames []string, singleIngress bool, ingressService string) *ServiceTopology {
+// BuildTopology builds a service topology from service names and configuration.
+// namespaces is the resolved service-name → namespace map; pass nil if no
+// namespace mapping is configured.
+func BuildTopology(serviceNames []string, singleIngress bool, ingressService string, namespaces map[string]string) *ServiceTopology {
 	topology := &ServiceTopology{
 		Services:       make([]*ServiceNode, 0, len(serviceNames)),
 		IngressServices: make([]*ServiceNode, 0),
@@ -53,6 +56,7 @@ func BuildTopology(serviceNames []string, singleIngress bool, ingressService str
 	for _, name := range serviceNames {
 		node := &ServiceNode{
 			Name:       name,
+			Namespace:  namespaces[name],
 			IsIngress:  false,
 			Operations: generateOperationsForService(name),
 			Downstream: make([]*ServiceNode, 0),
