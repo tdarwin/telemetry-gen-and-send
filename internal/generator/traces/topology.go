@@ -44,7 +44,8 @@ type ServiceTopology struct {
 
 // BuildTopology builds a service topology from service names and configuration.
 // namespaces is the resolved service-name → namespace map; pass nil if no
-// namespace mapping is configured.
+// namespace mapping is configured. When singleIngress is false, every service
+// is a possible trace entry point.
 func BuildTopology(serviceNames []string, singleIngress bool, ingressService string, namespaces map[string]string) *ServiceTopology {
 	topology := &ServiceTopology{
 		Services:       make([]*ServiceNode, 0, len(serviceNames)),
@@ -67,19 +68,18 @@ func BuildTopology(serviceNames []string, singleIngress bool, ingressService str
 
 	// Set ingress services
 	if singleIngress {
+		// A single named entry point.
 		if ingress, ok := serviceMap[ingressService]; ok {
 			ingress.IsIngress = true
 			topology.IngressServices = append(topology.IngressServices, ingress)
 		}
 	} else {
-		// Multiple ingresses - first 1-2 services
-		count := 1
-		if len(serviceNames) > 2 {
-			count = 2
-		}
-		for i := 0; i < count && i < len(topology.Services); i++ {
-			topology.Services[i].IsIngress = true
-			topology.IngressServices = append(topology.IngressServices, topology.Services[i])
+		// Multiple ingresses: every service is a possible entry point, so over
+		// a run traces are rooted across the whole topology and every service
+		// name appears as a trace root.
+		for _, service := range topology.Services {
+			service.IsIngress = true
+			topology.IngressServices = append(topology.IngressServices, service)
 		}
 	}
 

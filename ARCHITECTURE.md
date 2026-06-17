@@ -259,6 +259,15 @@ flowchart TD
 - `calculateDurations()`: Bottom-up calculation of span durations
 - `generateAttributes()`: Creates OpenTelemetry semantic attributes
 
+**Ingress (trace entry points)**:
+
+`traces.services.ingress` controls which services can be the root of a trace, selected at random per trace by `GetRandomIngress()`:
+
+- `single: true` — one named entry point (`ingress.service`, defaults to the first service).
+- `single: false` — every service is an entry point. Because downstream edges only go *forward* (service *i* calls *i+1..i+3*) and the span tree is depth-capped, a trace rooted at a single early service only reaches a small window of the service list. Letting any service be a root is therefore what surfaces all service names across a run — essential when generating a large estate (e.g. 500 services).
+
+**Service Namespace Mapping**:
+
 **Service Namespace Mapping**:
 
 When `traces.services.namespaces` or `traces.services.namespace_assignments` is set, the generator emits a `service.namespace` attribute on every span. The final service-name → namespace map is resolved once in `config.GeneratorConfig.ApplyDefaults` and stored on `ServicesConfig.ResolvedNamespaces`:

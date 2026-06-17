@@ -59,6 +59,8 @@ type ServicesConfig struct {
 
 // IngressConfig configures ingress service(s)
 type IngressConfig struct {
+	// Single selects one named entry point (Service). When false, every
+	// service is a possible trace entry point.
 	Single  bool   `yaml:"single"`
 	Service string `yaml:"service"`
 }
