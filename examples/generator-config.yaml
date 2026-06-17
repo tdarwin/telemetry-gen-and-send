@@ -45,7 +45,10 @@ traces:
       - "ads-service"
 
     ingress:
-      # true = single ingress service, false = multiple ingress services
+      # true  = a single ingress service (set `service` below)
+      # false = every service is a possible trace entry point. Over a run this
+      #         surfaces every service name as a trace root, which is what lets
+      #         all service names appear in large estates.
       single: false
       # Which service is the ingress (only used if single=true)
       # service: "api-gateway"
