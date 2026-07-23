@@ -160,12 +160,26 @@ func (t *TimestampInjector) extractSpanTiming(span *otlptrace.Span) (startOffset
 	return startOffset, duration
 }
 
+// ExtractEmitDelayMs reads the _template.emit_delay_ms attribute from a span,
+// returning 0 when absent. A positive value means the sender should export this
+// span that many milliseconds after the rest of its trace.
+func (t *TimestampInjector) ExtractEmitDelayMs(span *otlptrace.Span) int64 {
+	for _, attr := range span.Attributes {
+		if attr.Key == "_template.emit_delay_ms" {
+			return attr.Value.GetIntValue()
+		}
+	}
+	return 0
+}
+
 // removeTemplateAttributes removes template metadata from attributes
 func (t *TimestampInjector) removeTemplateAttributes(attrs []*commonpb.KeyValue) []*commonpb.KeyValue {
 	filtered := make([]*commonpb.KeyValue, 0, len(attrs))
 
 	for _, attr := range attrs {
-		if attr.Key != "_template.start_offset_nanos" && attr.Key != "_template.duration_nanos" {
+		if attr.Key != "_template.start_offset_nanos" &&
+			attr.Key != "_template.duration_nanos" &&
+			attr.Key != "_template.emit_delay_ms" {
 			filtered = append(filtered, attr)
 		}
 	}

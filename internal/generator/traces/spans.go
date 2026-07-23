@@ -3,6 +3,7 @@ package traces
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 
 	"github.com/honeycomb/telemetry-gen-and-send/internal/config"
 	"github.com/honeycomb/telemetry-gen-and-send/internal/generator/common"
@@ -20,6 +21,12 @@ type SpanNode struct {
 	StartTime  int64 // relative offset from trace start (we'll add timestamps later)
 	Attributes []*commonpb.KeyValue
 	Children   []*SpanNode
+
+	// EmitDelayMs, when > 0, tells the sender to export this span that many
+	// milliseconds after the rest of its trace (via _template.emit_delay_ms).
+	// Used to simulate a root span that arrives after the receiver's trace
+	// timeout. Zero means "send with the rest of the trace" (the default).
+	EmitDelayMs int
 }
 
 // TraceTemplate represents a complete trace without timestamps
@@ -82,6 +89,9 @@ func (g *SpanGenerator) GenerateTrace() *TraceTemplate {
 	// Calculate durations bottom-up
 	g.calculateDurations(trace.RootSpan)
 
+	// Optionally make the root missing/late.
+	g.applyRootTreatment(trace)
+
 	return trace
 }
 
@@ -114,6 +124,11 @@ func (g *SpanGenerator) GenerateHighSpanTrace(spanCount int) *TraceTemplate {
 	g.buildWideSpanTree(trace.RootSpan, remainingSpans, 0)
 
 	g.calculateDurations(trace.RootSpan)
+
+	// Optionally make the root missing/late — applies to gigatraces too, so
+	// a high-span trace can accumulate in the receiver's cache before (or
+	// without) its root arriving.
+	g.applyRootTreatment(trace)
 
 	return trace
 }
@@ -274,8 +289,18 @@ func (g *SpanGenerator) generateAttributes(service *ServiceNode, op Operation) [
 		attrs = append(attrs, common.CreateStringAttribute("span.kind", "internal"))
 	}
 
-	// Randomly add custom attributes (30% chance)
-	if common.RandomInt(1, 100) <= 30 && len(g.customAttrs) > 0 {
+	// Fat-span mode: attach a deterministic number of large string attributes
+	// to EVERY span to inflate per-span byte size without changing span count.
+	// When disabled (the default), fall back to the legacy random path.
+	ca := g.config.CustomAttributes
+	if ca.FatSpansEnabled() {
+		numFat := common.RandomInt(ca.PerSpanMin, ca.PerSpanMax)
+		for i := 0; i < numFat; i++ {
+			key := fmt.Sprintf("%s.%d", ca.KeyPrefix, i)
+			attrs = append(attrs, common.CreateStringAttribute(key, common.RandomString(ca.ValueBytes)))
+		}
+	} else if common.RandomInt(1, 100) <= 30 && len(g.customAttrs) > 0 {
+		// Legacy behavior: randomly add 1-3 custom attributes to ~30% of spans.
 		numCustom := common.RandomInt(1, 3)
 		for i := 0; i < numCustom && i < len(g.customAttrs); i++ {
 			schema := common.RandomChoice(g.customAttrs)
@@ -284,6 +309,48 @@ func (g *SpanGenerator) generateAttributes(service *ServiceNode, op Operation) [
 	}
 
 	return attrs
+}
+
+// applyRootTreatment optionally makes a trace's root span "missing" (rootless)
+// or "late", according to the traces.root config. Both are percentage-gated and
+// default off, so a config without a root section leaves every trace with a
+// normal root that arrives with the rest of the trace.
+func (g *SpanGenerator) applyRootTreatment(trace *TraceTemplate) {
+	rc := g.config.Root
+
+	if rc.Rootless.Enabled && common.RandomInt(1, 100) <= rc.Rootless.Percentage {
+		// Give the root a phantom parent that is never emitted, so the receiver
+		// never sees a root span for this trace and holds it until the trace
+		// timeout expires. The span count is unchanged.
+		trace.RootSpan.ParentID = phantomParentID(collectSpanIDSet(trace))
+	}
+
+	if rc.LateRoot.Enabled && common.RandomInt(1, 100) <= rc.LateRoot.Percentage {
+		trace.RootSpan.EmitDelayMs = rc.LateRoot.DelayMs
+	}
+}
+
+// collectSpanIDSet returns the set of all span IDs present in a trace, keyed by
+// their raw string form.
+func collectSpanIDSet(trace *TraceTemplate) map[string]struct{} {
+	spans := trace.CollectSpans()
+	set := make(map[string]struct{}, len(spans))
+	for _, s := range spans {
+		set[string(s.SpanID)] = struct{}{}
+	}
+	return set
+}
+
+// phantomParentID returns a random 8-byte span ID guaranteed not to collide
+// with any real span ID in the trace. Assigning it as the root's parent makes
+// the receiver treat the root as a non-root child of a span that never arrives.
+func phantomParentID(used map[string]struct{}) []byte {
+	for {
+		id := generateSpanID()
+		if _, exists := used[string(id)]; !exists {
+			return id
+		}
+	}
 }
 
 // generateTraceID generates a random trace ID (16 bytes)

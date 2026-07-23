@@ -20,6 +20,7 @@ The separation allows you to generate telemetry once and replay it multiple time
   - OpenTelemetry semantic conventions (HTTP, Database)
   - Custom attributes
   - Support for high-span-count traces (100k+ spans)
+  - Telemetry-shape controls for stressing sampling proxies (fat spans, missing/late root spans, gigatraces) — reshape telemetry to crash a proxy like Refinery *without* raising events/sec
   
 - ✅ **Metrics**: Generates OpenTelemetry metrics:
   - Host metrics (CPU, memory, disk, network)
@@ -262,7 +263,28 @@ The sender will:
 - `traces.services.names` - Service names (optional)
 - `traces.services.ingress.single` - Single or multiple ingress services
 - `traces.services.ingress.service` - Ingress service name
-- `traces.custom_attributes.count` - Number of custom attributes
+- `traces.custom_attributes.count` - Size of the legacy random-attribute pool (a few small attrs added to ~30% of spans)
+
+##### Telemetry-shape controls (default OFF)
+
+These reshape telemetry to stress a downstream sampling proxy (e.g. Refinery) **without** changing events/sec — the sender throttles by span count, so only the cost/lifetime of each event or trace changes. All default off, so omitting them leaves output unchanged. See [ARCHITECTURE.md](./ARCHITECTURE.md) for mechanics.
+
+**Fat spans** — inflate per-span byte size (`span_bytes ≈ 250 + per_span × (value_bytes + 21)`):
+- `traces.custom_attributes.per_span_min` - Minimum fat attributes forced onto every span (default 0)
+- `traces.custom_attributes.per_span_max` - Maximum fat attributes forced onto every span; `> 0` enables fat mode and bypasses the legacy random path
+- `traces.custom_attributes.value_bytes` - Byte length of each fat attribute's string value (required when `per_span_max > 0`)
+- `traces.custom_attributes.key_prefix` - Key prefix for fat attributes → `<prefix>.0..N-1` (default `custom.fat`)
+
+**Missing / late root** — hold traces in the receiver's cache longer at the same event rate:
+- `traces.root.rootless.enabled` - Give a percentage of traces a phantom (never-sent) parent so the receiver never sees a root
+- `traces.root.rootless.percentage` - Percent of traces made rootless (0-100)
+- `traces.root.late_root.enabled` - Defer the root span so it arrives after the receiver's trace timeout
+- `traces.root.late_root.percentage` - Percent of traces with a late root (0-100)
+- `traces.root.late_root.delay_ms` - How long to delay the root's export (should exceed the receiver's trace timeout; requires `enabled`)
+
+#### Limits
+- `limits.max_memory_gb` - Cap on the estimated in-memory dataset size (default 10). The estimate accounts for fat-span bytes, so raise this for large fat/gigatrace configs
+- `limits.allow_unbounded` - Disable the memory cap entirely (prints a warning); for deliberate stress runs
 
 #### Metrics
 - `metrics.metric_count` - Number of distinct metrics
@@ -298,6 +320,8 @@ The sender will:
 - `sending.concurrency` - Number of parallel worker goroutines for sending
 - `sending.duration` - Maximum time to send ("5m", "1h", "0" for no limit)
 - `sending.multiplier` - How many times to replay templates (0 for infinite)
+- `sending.deferred.drain_timeout` - Grace period, after the send loop ends, to flush late (deferred) root spans (default `120s`; should be ≥ the largest `late_root.delay_ms`). Only relevant when the telemetry uses `traces.root.late_root`
+- `sending.deferred.max_pending` - Max deferred payloads held at once; overflow is dropped and reported (default 100000)
 
 **Note on duration vs multiplier**: The sender stops when **whichever comes first**:
 - All multiplier iterations complete, OR
@@ -320,7 +344,7 @@ Examples:
 - Generates 2,000 metrics (600k time series) in ~500ms
 - Generates 50,000 logs in ~200ms
 - Total: ~2MB of telemetry data in under 1 second
-- **Memory validation**: Prevents generating datasets >10GB
+- **Memory validation**: Prevents generating oversized datasets (default cap 10GB; configurable via `limits.max_memory_gb` / `limits.allow_unbounded`)
 
 ### Sender
 - Configurable throughput with rate limiting
@@ -328,7 +352,7 @@ Examples:
 - Concurrent workers for high throughput
 - Real-time statistics reporting
 - **Intelligent batching**: Span-count-aware batching (max 10k spans/batch)
-- **Memory limit**: 10GB maximum dataset size
+- **Memory limit**: configurable dataset cap (default 10GB, see `limits.*`)
 - Resource efficient design
 
 See [MEMORY_LIMITS.md](./MEMORY_LIMITS.md) for detailed memory usage guidelines and performance tips.

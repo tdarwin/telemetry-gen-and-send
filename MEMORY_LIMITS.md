@@ -4,7 +4,10 @@ This document explains memory usage, limits, and best practices for generating a
 
 ## Overview
 
-The sender loads all generated telemetry templates into memory before sending them. To ensure reliable operation, we enforce a **10GB memory limit** for the sender process.
+The sender loads all generated telemetry templates into memory before sending them. To ensure reliable operation, the generator enforces a memory limit on the estimated dataset size — **10GB by default**. This cap is configurable:
+
+- `limits.max_memory_gb` — raise or lower the cap (default 10)
+- `limits.allow_unbounded` — disable the cap entirely (prints a warning); intended for deliberate stress runs
 
 ## Memory Estimation
 
@@ -12,31 +15,48 @@ The sender loads all generated telemetry templates into memory before sending th
 
 | Telemetry Type | Memory per Object |
 |----------------|-------------------|
-| **Trace Span** | ~2KB |
+| **Trace Span** (base) | ~2KB |
 | **Metric Data Point** | ~400 bytes |
 | **Log Record** | ~800 bytes |
 
 ### Calculation Formula
 
 ```
-Total Memory = (Total Spans × 2KB) + (Total Data Points × 400 bytes) + (Total Logs × 800 bytes)
+Total Memory = (Total Spans × per-span bytes) + (Total Data Points × 400 bytes) + (Total Logs × 800 bytes)
 ```
 
-**Example:**
+The base per-span cost is ~2KB. When **fat spans** are configured
+(`traces.custom_attributes.per_span_max > 0`), each span's estimate grows by the
+configured attribute payload:
+
+```
+per-span bytes = 2KB + per_span_max × (value_bytes + 32)
+```
+
+So the estimate stays honest for fat-span/gigatrace configs and won't let a
+config silently try to build a huge file.
+
+**Example (normal spans):**
 - 1,000 traces × 30 spans avg = 30,000 spans → **60 MB**
 - 250 metrics × 300 time series = 75,000 data points → **30 MB**
 - 10,000 log records → **8 MB**
 - **Total: ~98 MB** (well under limit)
 
+**Example (fat spans):**
+- 800 traces × 20 spans = 16,000 spans, `per_span_max: 20`, `value_bytes: 1500`
+- per-span bytes = 2KB + 20 × (1500 + 32) ≈ 32.7 KB
+- 16,000 × 32.7 KB ≈ **~500 MB**
+
 ## Generator Configuration Limits
 
 ### Maximum Values
 
-The generator automatically validates that your configuration won't exceed the 10GB memory limit. If it does, you'll see an error like:
+The generator automatically validates that your configuration won't exceed the memory limit (10GB by default). If it does, you'll see an error like:
 
 ```
-Error: estimated sender memory usage (12.34 GB) exceeds maximum (10 GB).
-Reduce trace count, spans per trace, high-span traces, metrics, or logs.
+Error: estimated sender memory usage (12.34 GB) exceeds maximum (10.00 GB).
+Reduce trace count, spans per trace, high-span traces, custom attribute size,
+metrics, or logs — or raise limits.max_memory_gb / set limits.allow_unbounded.
 ```
 
 ### Recommended Limits
@@ -184,14 +204,16 @@ Both patterns use similar memory but have different characteristics for testing 
 
 ### "Estimated memory exceeds maximum" Error
 
-**Cause**: Configuration would generate a dataset >10GB.
+**Cause**: Configuration would generate a dataset larger than the cap (10GB by default).
 
 **Solutions**:
 1. Reduce `traces.count`
 2. Reduce `traces.spans.avg_per_trace`
 3. Reduce or disable `high_span_traces`
-4. Reduce `metrics.metric_count` or `timeseries_per_metric`
-5. Reduce `logs.count`
+4. Reduce fat-span size (`traces.custom_attributes.per_span_max` / `value_bytes`)
+5. Reduce `metrics.metric_count` or `timeseries_per_metric`
+6. Reduce `logs.count`
+7. Or, for a deliberate stress run, raise `limits.max_memory_gb` (or set `limits.allow_unbounded: true`) — and make sure the machine has the RAM/disk for it
 
 ### Large Traces Taking Time to Send
 
@@ -316,12 +338,15 @@ The sender loads everything into memory for fast replay with `multiplier: 0` (in
 Potential enhancements for even larger datasets:
 1. **Streaming loader**: Load templates incrementally rather than all at once
 2. **Chunked high-span traces**: Split very large traces into multiple exports
-3. **Configurable memory limit**: Allow users to adjust the 10GB limit
-4. **Automatic batch sizing**: Dynamically calculate optimal batch sizes
+3. **Automatic batch sizing**: Dynamically calculate optimal batch sizes
+
+> The memory cap is now adjustable via `limits.max_memory_gb` /
+> `limits.allow_unbounded` (see [Overview](#overview)).
 
 ## Summary
 
-- **10GB memory limit** enforced by generator validation
+- **10GB memory limit** (default) enforced by generator validation; adjustable via `limits.max_memory_gb` / `limits.allow_unbounded`
+- **Per-span estimate accounts for fat spans** (`2KB + per_span_max × (value_bytes + 32)`)
 - **10k spans per batch** limit enforced by sender
 - **Use many normal traces** instead of few high-span traces
 - **Monitor "Estimated sender memory"** output from generator

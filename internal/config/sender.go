@@ -33,11 +33,29 @@ type OTLPConfig struct {
 
 // SendingConfig configures how telemetry is sent
 type SendingConfig struct {
-	RateLimit   RateLimitConfig   `yaml:"rate_limit"`
-	BatchSize   BatchSizeConfig   `yaml:"batch_size"`
-	Concurrency int               `yaml:"concurrency"`
-	Duration    string            `yaml:"duration"`
-	Multiplier  int               `yaml:"multiplier"`
+	RateLimit   RateLimitConfig `yaml:"rate_limit"`
+	BatchSize   BatchSizeConfig `yaml:"batch_size"`
+	Concurrency int             `yaml:"concurrency"`
+	Duration    string          `yaml:"duration"`
+	Multiplier  int             `yaml:"multiplier"`
+	Deferred    DeferredConfig  `yaml:"deferred"`
+}
+
+// DeferredConfig configures the deferred-emission scheduler that exports spans
+// carrying a positive _template.emit_delay_ms later than the rest of their
+// trace (used to simulate late-arriving root spans). Both fields have safe
+// defaults, so a config that never uses late spans is unaffected.
+type DeferredConfig struct {
+	// DrainTimeout is the grace period the sender waits, after its send loop
+	// ends, for outstanding deferred spans to reach their scheduled send time.
+	// It should exceed the receiver's trace timeout so late roots still flush
+	// on a clean shutdown. Default "120s".
+	DrainTimeout string `yaml:"drain_timeout"`
+
+	// MaxPending caps the number of deferred payloads held in the scheduler at
+	// once; excess enqueues are dropped and counted in the final stats.
+	// Default 100000.
+	MaxPending int `yaml:"max_pending"`
 }
 
 // RateLimitConfig configures rate limiting
@@ -132,6 +150,16 @@ func (c *SenderConfig) Validate() error {
 		return fmt.Errorf("timestamps.backdate_ms must be non-negative")
 	}
 
+	if c.Sending.Deferred.DrainTimeout != "" {
+		if _, err := time.ParseDuration(c.Sending.Deferred.DrainTimeout); err != nil {
+			return fmt.Errorf("invalid sending.deferred.drain_timeout format: %w", err)
+		}
+	}
+
+	if c.Sending.Deferred.MaxPending < 0 {
+		return fmt.Errorf("sending.deferred.max_pending must be non-negative")
+	}
+
 	return nil
 }
 
@@ -154,6 +182,19 @@ func (c *SenderConfig) ApplyDefaults() {
 	if c.Timestamps.JitterMs == 0 {
 		c.Timestamps.JitterMs = 1000 // 1 second default
 	}
+
+	if c.Sending.Deferred.DrainTimeout == "" {
+		c.Sending.Deferred.DrainTimeout = "120s"
+	}
+	if c.Sending.Deferred.MaxPending == 0 {
+		c.Sending.Deferred.MaxPending = 100000
+	}
+}
+
+// GetDeferredDrainTimeout parses and returns the deferred-scheduler drain
+// timeout.
+func (c *SenderConfig) GetDeferredDrainTimeout() (time.Duration, error) {
+	return time.ParseDuration(c.Sending.Deferred.DrainTimeout)
 }
 
 // GetDuration parses and returns the sending duration

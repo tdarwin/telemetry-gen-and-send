@@ -130,6 +130,13 @@ func main() {
 		cancel()
 	}()
 
+	// Parse the deferred-emission drain timeout (used for late spans).
+	drainTimeout, err := cfg.GetDeferredDrainTimeout()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing deferred drain timeout: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Create worker pool
 	pool := workers.NewWorkerPool(
 		cfg.Sending.Concurrency,
@@ -144,6 +151,10 @@ func main() {
 		cfg.Sending.BatchSize.Traces,
 		cfg.Sending.BatchSize.Metrics,
 		cfg.Sending.BatchSize.Logs,
+		workers.DeferredOptions{
+			MaxPending:   cfg.Sending.Deferred.MaxPending,
+			DrainTimeout: drainTimeout,
+		},
 	)
 
 	// Start sending

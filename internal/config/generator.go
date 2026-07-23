@@ -14,6 +14,20 @@ type GeneratorConfig struct {
 	Traces  TracesConfig  `yaml:"traces"`
 	Metrics MetricsConfig `yaml:"metrics"`
 	Logs    LogsConfig    `yaml:"logs"`
+	Limits  LimitsConfig  `yaml:"limits"`
+}
+
+// LimitsConfig overrides the safety cap on estimated in-memory dataset size.
+// It exists for the Refinery-stress scenarios where fat spans and/or gigatraces
+// intentionally produce very large datasets. Both fields default to the historic
+// behavior (a 10GB cap) so existing configs are unaffected.
+type LimitsConfig struct {
+	// MaxMemoryGB is the estimated-memory ceiling enforced by Validate().
+	// 0 => default of 10 (applied in ApplyDefaults).
+	MaxMemoryGB float64 `yaml:"max_memory_gb"`
+	// AllowUnbounded disables the memory cap entirely. Intended only for
+	// deliberate stress runs; the generator prints a warning when it is set.
+	AllowUnbounded bool `yaml:"allow_unbounded"`
 }
 
 // OutputConfig configures where generated telemetry is written
@@ -28,6 +42,33 @@ type TracesConfig struct {
 	Spans            SpansConfig            `yaml:"spans"`
 	Services         ServicesConfig         `yaml:"services"`
 	CustomAttributes CustomAttributesConfig `yaml:"custom_attributes"`
+	Root             RootConfig             `yaml:"root"`
+}
+
+// RootConfig controls "missing/late root" trace shapes used to stress a
+// sampling proxy's trace cache (e.g. Refinery). Both sub-features default OFF,
+// so omitting this section preserves the historic behavior where every trace
+// has a normal root span that arrives with the rest of the trace.
+type RootConfig struct {
+	Rootless RootlessConfig `yaml:"rootless"`
+	LateRoot LateRootConfig `yaml:"late_root"`
+}
+
+// RootlessConfig gives a percentage of traces a phantom (never-emitted) parent
+// on their root span, so the receiver never sees a root and holds the trace
+// until its trace timeout expires. Span count is unchanged.
+type RootlessConfig struct {
+	Enabled    bool `yaml:"enabled"`
+	Percentage int  `yaml:"percentage"`
+}
+
+// LateRootConfig stamps the root span of a percentage of traces with an emit
+// delay (via the _template.emit_delay_ms attribute) so the sender exports the
+// root later than the rest of the trace — after the receiver's trace timeout.
+type LateRootConfig struct {
+	Enabled    bool `yaml:"enabled"`
+	Percentage int  `yaml:"percentage"`
+	DelayMs    int  `yaml:"delay_ms"`
 }
 
 // SpansConfig configures span generation within traces
@@ -65,9 +106,38 @@ type IngressConfig struct {
 	Service string `yaml:"service"`
 }
 
-// CustomAttributesConfig configures custom attributes on spans
+// CustomAttributesConfig configures custom attributes on spans.
+//
+// The legacy behavior (Count only) attaches a small, random set of custom
+// attributes to ~30% of spans, drawn from a pool of Count distinct schemas.
+//
+// The "fat span" fields below force a deterministic number of large
+// attributes onto EVERY span, letting a config inflate per-span byte size
+// (tens of KB) without changing span or event counts. They default to zero,
+// which preserves the legacy behavior exactly.
 type CustomAttributesConfig struct {
+	// Count is the size of the legacy random-attribute schema pool.
 	Count int `yaml:"count"`
+
+	// PerSpanMin and PerSpanMax force a deterministic count of fat attributes
+	// on every span (a random value in [min, max]). When PerSpanMax > 0 the
+	// legacy 30%/1-3 random path is bypassed for fat attributes.
+	PerSpanMin int `yaml:"per_span_min"`
+	PerSpanMax int `yaml:"per_span_max"`
+
+	// ValueBytes is the length (in bytes) of each fat attribute's string value.
+	ValueBytes int `yaml:"value_bytes"`
+
+	// KeyPrefix names the fat attributes: <prefix>.0 .. <prefix>.N-1. Distinct
+	// keys create per-span column pressure in addition to raw byte size.
+	// Defaults to "custom.fat" when fat mode is enabled.
+	KeyPrefix string `yaml:"key_prefix"`
+}
+
+// FatSpansEnabled reports whether deterministic fat attributes should be
+// attached to every span.
+func (c CustomAttributesConfig) FatSpansEnabled() bool {
+	return c.PerSpanMax > 0
 }
 
 // MetricsConfig configures metric generation
@@ -128,6 +198,11 @@ func LoadGeneratorConfig(path string) (*GeneratorConfig, error) {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
+	if config.Limits.AllowUnbounded {
+		fmt.Println("WARNING: limits.allow_unbounded is set — the dataset memory cap is disabled. " +
+			"Generation may consume very large amounts of memory and disk.")
+	}
+
 	// Apply defaults
 	config.ApplyDefaults()
 
@@ -145,9 +220,29 @@ const (
 	// Logs: Each log record is ~800 bytes
 	bytesPerLogRecord = 800
 
-	// Maximum memory usage for sender (10GB limit)
-	maxMemoryBytes = 10 * 1024 * 1024 * 1024 // 10GB
+	// Default maximum memory usage for the dataset (10GB). Overridable via
+	// limits.max_memory_gb / limits.allow_unbounded.
+	defaultMaxMemoryGB = 10
+
+	// Per-fat-attribute overhead beyond the value bytes: key string plus
+	// protobuf field/length framing. Deliberately conservative so the estimate
+	// never under-counts a fat-span dataset.
+	fatAttrKeyOverhead = 32
 )
+
+// perSpanBytes returns the estimated in-memory size of a single span, including
+// any configured fat custom attributes. bytesPerSpan is the base cost (IDs,
+// name, status, semantic attributes, protobuf overhead); fat attributes are
+// added on top using the worst-case per-span count so validation can't
+// under-estimate.
+func (c *GeneratorConfig) perSpanBytes() int64 {
+	base := int64(bytesPerSpan)
+	ca := c.Traces.CustomAttributes
+	if ca.FatSpansEnabled() {
+		base += int64(ca.PerSpanMax) * int64(ca.ValueBytes+fatAttrKeyOverhead)
+	}
+	return base
+}
 
 // EstimateMemoryUsage calculates the approximate memory usage in bytes for the sender
 func (c *GeneratorConfig) EstimateMemoryUsage() int64 {
@@ -160,7 +255,7 @@ func (c *GeneratorConfig) EstimateMemoryUsage() int64 {
 		highSpanTraceSpans = c.Traces.Spans.HighSpanTraces.Count * c.Traces.Spans.HighSpanTraces.SpanCount
 	}
 	totalSpans := normalTraceSpans + highSpanTraceSpans
-	totalBytes += int64(totalSpans) * bytesPerSpan
+	totalBytes += int64(totalSpans) * c.perSpanBytes()
 
 	// Calculate metric data point memory
 	// Use average of min and max for estimation
@@ -222,6 +317,14 @@ func (c *GeneratorConfig) Validate() error {
 		if err := c.validateNamespaceConfig(); err != nil {
 			return err
 		}
+
+		if err := c.validateCustomAttributes(); err != nil {
+			return err
+		}
+
+		if err := c.validateRootConfig(); err != nil {
+			return err
+		}
 	}
 
 	// Only validate metrics configuration if metrics are enabled
@@ -249,16 +352,64 @@ func (c *GeneratorConfig) Validate() error {
 		}
 	}
 
-	// Validate memory usage doesn't exceed 10GB limit
-	estimatedMemory := c.EstimateMemoryUsage()
-	if estimatedMemory > maxMemoryBytes {
-		memoryGB := float64(estimatedMemory) / (1024 * 1024 * 1024)
-		maxGB := float64(maxMemoryBytes) / (1024 * 1024 * 1024)
-		return fmt.Errorf("estimated sender memory usage (%.2f GB) exceeds maximum (%.0f GB). "+
-			"Reduce trace count, spans per trace, high-span traces, metrics, or logs. "+
-			"See documentation for memory calculation details", memoryGB, maxGB)
+	// Validate estimated memory usage doesn't exceed the configured cap.
+	// limits.allow_unbounded disables the check entirely (for deliberate
+	// stress runs). limits.max_memory_gb (default 10) sets the ceiling.
+	if !c.Limits.AllowUnbounded {
+		maxGB := c.Limits.MaxMemoryGB
+		if maxGB == 0 {
+			maxGB = defaultMaxMemoryGB
+		}
+		maxBytes := int64(maxGB * 1024 * 1024 * 1024)
+		estimatedMemory := c.EstimateMemoryUsage()
+		if estimatedMemory > maxBytes {
+			memoryGB := float64(estimatedMemory) / (1024 * 1024 * 1024)
+			return fmt.Errorf("estimated sender memory usage (%.2f GB) exceeds maximum (%.2f GB). "+
+				"Reduce trace count, spans per trace, high-span traces, custom attribute size, "+
+				"metrics, or logs — or raise limits.max_memory_gb / set limits.allow_unbounded. "+
+				"See documentation for memory calculation details", memoryGB, maxGB)
+		}
 	}
 
+	return nil
+}
+
+// validateCustomAttributes checks the fat-span controls in
+// traces.custom_attributes.
+func (c *GeneratorConfig) validateCustomAttributes() error {
+	ca := c.Traces.CustomAttributes
+	if ca.PerSpanMin < 0 || ca.PerSpanMax < 0 {
+		return fmt.Errorf("traces.custom_attributes.per_span_min/per_span_max must be non-negative")
+	}
+	if ca.PerSpanMax < ca.PerSpanMin {
+		return fmt.Errorf("traces.custom_attributes.per_span_max must be >= per_span_min")
+	}
+	if ca.ValueBytes < 0 {
+		return fmt.Errorf("traces.custom_attributes.value_bytes must be non-negative")
+	}
+	if ca.PerSpanMax > 0 && ca.ValueBytes == 0 {
+		return fmt.Errorf("traces.custom_attributes.value_bytes must be > 0 when per_span_max > 0")
+	}
+	return nil
+}
+
+// validateRootConfig checks the missing/late root controls in traces.root.
+func (c *GeneratorConfig) validateRootConfig() error {
+	r := c.Traces.Root
+	for _, p := range []struct {
+		name string
+		val  int
+	}{
+		{"rootless.percentage", r.Rootless.Percentage},
+		{"late_root.percentage", r.LateRoot.Percentage},
+	} {
+		if p.val < 0 || p.val > 100 {
+			return fmt.Errorf("traces.root.%s must be between 0 and 100", p.name)
+		}
+	}
+	if r.LateRoot.Enabled && r.LateRoot.DelayMs <= 0 {
+		return fmt.Errorf("traces.root.late_root.delay_ms must be > 0 when late_root is enabled")
+	}
 	return nil
 }
 
@@ -266,6 +417,10 @@ func (c *GeneratorConfig) Validate() error {
 func (c *GeneratorConfig) ApplyDefaults() {
 	if c.Output.Prefix == "" {
 		c.Output.Prefix = "telemetry"
+	}
+
+	if c.Limits.MaxMemoryGB == 0 {
+		c.Limits.MaxMemoryGB = defaultMaxMemoryGB
 	}
 
 	// Only apply metrics defaults if metrics are enabled
@@ -286,6 +441,11 @@ func (c *GeneratorConfig) ApplyDefaults() {
 		// Set default ingress if single ingress and service not specified
 		if c.Traces.Services.Ingress.Single && c.Traces.Services.Ingress.Service == "" {
 			c.Traces.Services.Ingress.Service = c.Traces.Services.Names[0]
+		}
+
+		// Default the fat-attribute key prefix when fat spans are enabled.
+		if c.Traces.CustomAttributes.FatSpansEnabled() && c.Traces.CustomAttributes.KeyPrefix == "" {
+			c.Traces.CustomAttributes.KeyPrefix = "custom.fat"
 		}
 
 		c.resolveServiceNamespaces()

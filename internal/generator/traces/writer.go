@@ -131,6 +131,20 @@ func (w *TraceWriter) tracesToOTLP(traces []*TraceTemplate) *otlpcollectortrace.
 				},
 			})
 
+			// Store per-span emit delay (only when set) so the sender can
+			// export this span later than the rest of its trace. Omitted when
+			// zero to keep baseline output byte-identical.
+			if spanNode.EmitDelayMs > 0 {
+				otlpSpan.Attributes = append(otlpSpan.Attributes, &commonpb.KeyValue{
+					Key: "_template.emit_delay_ms",
+					Value: &commonpb.AnyValue{
+						Value: &commonpb.AnyValue_IntValue{
+							IntValue: int64(spanNode.EmitDelayMs),
+						},
+					},
+				})
+			}
+
 			rs.ScopeSpans[0].Spans = append(rs.ScopeSpans[0].Spans, otlpSpan)
 		}
 

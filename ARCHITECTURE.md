@@ -483,6 +483,14 @@ flowchart TD
 - `jitterMs`: Random variance added to timestamps (0-N milliseconds)
 - `backdateMs`: Shifts timestamps into the past for historical data testing
 
+**Late-span support**: A span may carry a `_template.emit_delay_ms` attribute
+(written by the generator's late-root feature). The injector exposes
+`ExtractEmitDelayMs()` for the worker pool to read it, and strips it (along with
+the other `_template.*` attributes) before export so it never reaches the
+backend. The delay affects only when the span is *exported*, not its injected
+timestamp — the span still reflects the real trace start time, it just arrives
+late (see Deferred Scheduler).
+
 ##### ID Regenerator (`internal/sender/transformer/ids.go`)
 
 **Purpose**: Regenerates trace and span IDs while preserving relationships.
@@ -502,6 +510,30 @@ flowchart TD
 ```
 
 **Why This Matters**: Ensures each send creates unique traces/spans while maintaining parent-child relationships.
+
+#### 4a. Trace Transform & Deferred Scheduler (`internal/sender/workers/`)
+
+Traces are transformed **once per trace** before sending: `transformTrace()`
+clones a trace's `ResourceSpans`, regenerates its IDs, and injects timestamps
+over **all** of the trace's spans in a single pass, then partitions them into an
+*immediate* set and zero or more *deferred* payloads keyed by
+`_template.emit_delay_ms`. Doing ID regeneration once per whole trace is what
+keeps a phantom/late root's parent-child links (and a split gigatrace's chunks)
+on a single consistent trace ID.
+
+Immediate spans flow through the normal batch/export path (`sendRawTraceBatch`,
+which only rate-limits and exports — no re-transformation). Deferred spans are
+handed to the **deferred scheduler** (`scheduler.go`): a single goroutine with a
+min-heap delay queue that exports each payload at `now + delay`. The scheduler:
+- decouples its exports from the main send context, so an interrupt/duration
+  limit does not drop already-scheduled late spans;
+- is drained by `WorkerPool.Run` after all workers finish (bounded by
+  `sending.deferred.drain_timeout`), so the process doesn't exit — and the trace
+  exporter isn't closed — while late roots are still pending;
+- caps outstanding payloads at `sending.deferred.max_pending` (overflow is
+  dropped and reported).
+
+This is the mechanism behind the "late root" telemetry shape (below).
 
 #### 5. Rate Limiter (`internal/sender/ratelimit/limiter.go`)
 
@@ -726,6 +758,45 @@ type Transformer interface {
 Then add to worker pool pipeline in `internal/sender/workers/pool.go`.
 
 ---
+
+## Telemetry-Shape Controls (Refinery stress scenarios)
+
+Beyond volume, the generator can reshape telemetry to stress a downstream
+sampling proxy (e.g. Refinery) **without increasing events per second** — the
+sender's rate limiter throttles by span count, so these knobs change only the
+cost or lifetime of each event/trace. All default OFF (baseline output is
+unchanged).
+
+Two generator primitives cover the common production crash patterns:
+
+**A. Per-span size inflation (fat spans)** — `traces.custom_attributes`:
+- `per_span_min` / `per_span_max` — attach a deterministic number of large
+  attributes to *every* span (bypasses the legacy 30%/1-3 random path).
+- `value_bytes` — length of each attribute's string value (via
+  `common.RandomString`).
+- `key_prefix` — attribute keys `<prefix>.0..N-1` (distinct keys also add column
+  pressure). Rough size: `span_bytes ≈ 250 + per_span × (value_bytes + 21)`.
+
+**B. Root-span timing** — `traces.root`:
+- `rootless.{enabled,percentage}` — give the root a **phantom** non-empty
+  parent ID (8 random bytes not matching any real span, chosen in
+  `applyRootTreatment`/`phantomParentID`) so the receiver never sees a root and
+  holds the trace until its trace timeout. The phantom ID survives the sender's
+  ID regeneration because it is never in the remap set.
+- `late_root.{enabled,percentage,delay_ms}` — stamp the root with
+  `EmitDelayMs`, written to disk as the `_template.emit_delay_ms` attribute; the
+  sender's deferred scheduler exports it `delay_ms` after the rest of the trace.
+
+Both primitives apply to normal **and** high-span (gigatrace) traces, so a
+gigatrace can be made rootless/late to accumulate in the receiver's cache.
+
+**Contract:** `_template.emit_delay_ms` is the only coupling between generator
+and sender for late roots — the generator writes it in `writer.go`, the sender
+reads it in `transformTrace` and strips it in `removeTemplateAttributes`.
+
+**Safety cap** — `limits.max_memory_gb` (default 10) / `limits.allow_unbounded`
+bound the estimated in-memory dataset size; the estimate accounts for fat-span
+bytes so a large fat/gigatrace config can't silently try to build a huge file.
 
 ## Configuration Reference
 

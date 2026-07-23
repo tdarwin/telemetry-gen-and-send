@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/honeycomb/telemetry-gen-and-send/internal/sender/exporter"
 	"github.com/honeycomb/telemetry-gen-and-send/internal/sender/loader"
@@ -34,10 +35,20 @@ type WorkerPool struct {
 	batchSizeMetrics  int
 	batchSizeLogs     int
 
+	// scheduler exports late spans (those carrying _template.emit_delay_ms)
+	// after the rest of their trace. nil when there is no trace exporter.
+	scheduler *deferredScheduler
+
 	// Worker distribution by signal type (exported for visibility)
 	TraceWorkers   int
 	MetricsWorkers int
 	LogsWorkers    int
+}
+
+// DeferredOptions configures the deferred-emission scheduler for late spans.
+type DeferredOptions struct {
+	MaxPending   int
+	DrainTimeout time.Duration
 }
 
 // NewWorkerPool creates a new worker pool with workers divided by signal type
@@ -54,6 +65,7 @@ func NewWorkerPool(
 	batchSizeTraces int,
 	batchSizeMetrics int,
 	batchSizeLogs int,
+	deferredOpts DeferredOptions,
 ) *WorkerPool {
 	pool := &WorkerPool{
 		numWorkers:        numWorkers,
@@ -68,6 +80,11 @@ func NewWorkerPool(
 		batchSizeTraces:   batchSizeTraces,
 		batchSizeMetrics:  batchSizeMetrics,
 		batchSizeLogs:     batchSizeLogs,
+	}
+
+	// Only traces use deferred emission, so the scheduler needs a trace exporter.
+	if traceExporter != nil {
+		pool.scheduler = newDeferredScheduler(traceExporter, rateLimiter, reporter, deferredOpts.MaxPending, deferredOpts.DrainTimeout)
 	}
 
 	// Calculate worker distribution based on data volume
@@ -188,6 +205,12 @@ func (p *WorkerPool) Run(ctx context.Context, multiplier int) error {
 	// Error channel
 	errCh := make(chan error, p.numWorkers)
 
+	// Start the deferred-emission scheduler (for late spans) before workers so
+	// it is ready to receive enqueues.
+	if p.scheduler != nil {
+		p.scheduler.Start()
+	}
+
 	// Start trace workers
 	if p.TraceWorkers > 0 && p.traceExporter != nil && p.templates.Traces != nil {
 		for i := 0; i < p.TraceWorkers; i++ {
@@ -223,6 +246,17 @@ func (p *WorkerPool) Run(ctx context.Context, multiplier int) error {
 
 	// Wait for all workers to finish
 	wg.Wait()
+
+	// Workers are done, so no more deferred spans will be enqueued. Drain the
+	// scheduler (honoring each late span's scheduled time up to the drain
+	// timeout) before returning, so the process doesn't exit — and the trace
+	// exporter isn't closed — while late roots are still pending.
+	if p.scheduler != nil {
+		if dropped := p.scheduler.Close(); dropped > 0 {
+			fmt.Printf("WARNING: %d deferred span(s) were dropped (queue full or drain timeout exceeded)\n", dropped)
+		}
+	}
+
 	close(errCh)
 
 	// Check for errors
@@ -346,8 +380,18 @@ func (p *WorkerPool) logsWorker(ctx context.Context, workerID int, multiplier in
 	}
 }
 
-// sendTraces sends traces in batches based on configured batch size and span count limits
-// Large traces are automatically split across multiple batches
+// deferredReq is a transformed trace payload to be exported after delayMs.
+type deferredReq struct {
+	delayMs   int64
+	req       *otlpcollectortrace.ExportTraceServiceRequest
+	spanCount int
+}
+
+// sendTraces sends traces in batches based on configured batch size and span
+// count limits. Each trace is transformed once (ID regeneration + timestamp
+// injection over all of its spans) and then split into an immediate set and any
+// deferred (late) spans, so the trace ID stays consistent across every part.
+// Large traces are automatically split across multiple batches.
 func (p *WorkerPool) sendTraces(ctx context.Context) error {
 	if p.templates.Traces == nil || len(p.templates.Traces.ResourceSpans) == 0 {
 		return nil
@@ -359,6 +403,18 @@ func (p *WorkerPool) sendTraces(ctx context.Context) error {
 	currentBatch := make([]*otlptrace.ResourceSpans, 0, p.batchSizeTraces)
 	currentSpanCount := 0
 
+	flush := func() error {
+		if len(currentBatch) == 0 {
+			return nil
+		}
+		if err := p.sendRawTraceBatch(ctx, currentBatch); err != nil {
+			return err
+		}
+		currentBatch = currentBatch[:0]
+		currentSpanCount = 0
+		return nil
+	}
+
 	for i := 0; i < totalResourceSpans; i++ {
 		// Check context periodically
 		if i%100 == 0 {
@@ -369,67 +425,137 @@ func (p *WorkerPool) sendTraces(ctx context.Context) error {
 			}
 		}
 
-		rs := p.templates.Traces.ResourceSpans[i]
+		// Transform the whole trace once, then partition into immediate and
+		// deferred (late) spans that share the regenerated trace ID.
+		immediate, deferred, immSpanCount := p.transformTrace(p.templates.Traces.ResourceSpans[i])
 
-		// Count spans in this resource span
-		rsSpanCount := 0
-		for _, ss := range rs.ScopeSpans {
-			rsSpanCount += len(ss.Spans)
+		// Schedule any late spans (e.g. a delayed root) for later export.
+		for _, d := range deferred {
+			p.enqueueDeferred(d)
 		}
 
-		// If this trace fits in a single batch, handle normally
-		if rsSpanCount <= maxSpansPerBatch {
-			// Check if adding this trace would exceed limits
-			wouldExceedSpanLimit := currentSpanCount+rsSpanCount > maxSpansPerBatch
-			wouldExceedTraceLimit := len(currentBatch) >= p.batchSizeTraces
+		if immSpanCount == 0 {
+			// Entire trace is deferred (e.g. a single delayed root span).
+			continue
+		}
 
-			// Send current batch if adding this trace would exceed limits
-			if len(currentBatch) > 0 && (wouldExceedSpanLimit || wouldExceedTraceLimit) {
-				if err := p.sendTraceBatch(ctx, currentBatch); err != nil {
-					return err
-				}
-				currentBatch = currentBatch[:0] // Reset slice
-				currentSpanCount = 0
+		// If the immediate portion alone exceeds the per-batch span limit,
+		// flush pending work and chunk it across batches.
+		if immSpanCount > maxSpansPerBatch {
+			if err := flush(); err != nil {
+				return err
 			}
-
-			// Add this trace to current batch
-			currentBatch = append(currentBatch, rs)
-			currentSpanCount += rsSpanCount
-		} else {
-			// This trace is too large for a single batch - need to split it
-			// First, flush any pending batch
-			if len(currentBatch) > 0 {
-				if err := p.sendTraceBatch(ctx, currentBatch); err != nil {
-					return err
-				}
-				currentBatch = currentBatch[:0]
-				currentSpanCount = 0
+			if err := p.sendLargeImmediate(ctx, immediate, maxSpansPerBatch); err != nil {
+				return err
 			}
+			continue
+		}
 
-			// Split this large trace across multiple batches
-			if err := p.sendLargeTrace(ctx, rs, maxSpansPerBatch); err != nil {
+		wouldExceedSpanLimit := currentSpanCount+immSpanCount > maxSpansPerBatch
+		wouldExceedTraceLimit := len(currentBatch) >= p.batchSizeTraces
+		if len(currentBatch) > 0 && (wouldExceedSpanLimit || wouldExceedTraceLimit) {
+			if err := flush(); err != nil {
 				return err
 			}
 		}
+
+		currentBatch = append(currentBatch, immediate)
+		currentSpanCount += immSpanCount
 	}
 
 	// Send remaining batch
-	if len(currentBatch) > 0 {
-		if err := p.sendTraceBatch(ctx, currentBatch); err != nil {
-			return err
+	return flush()
+}
+
+// transformTrace clones a single trace's ResourceSpans, regenerates its IDs and
+// injects timestamps over ALL of its spans at once (so the trace ID and span
+// IDs stay consistent), then partitions the result into an immediate
+// ResourceSpans and zero or more deferred payloads keyed by emit delay.
+//
+// Note: the generator writes each trace as one ResourceSpans (usually with a
+// single ScopeSpans); this function does not split a trace's spans across the
+// ID-regeneration pass, which is what keeps a phantom/late root correct.
+func (p *WorkerPool) transformTrace(rs *otlptrace.ResourceSpans) (immediate *otlptrace.ResourceSpans, deferred []deferredReq, immSpanCount int) {
+	clone := cloneTraceBatch([]*otlptrace.ResourceSpans{rs}).ResourceSpans[0]
+
+	// One-shot ID regeneration across every span in the trace.
+	var allSpans []*otlptrace.Span
+	for _, ss := range clone.ScopeSpans {
+		allSpans = append(allSpans, ss.Spans...)
+	}
+	p.idRegenerator.RegenerateTraceIDs(allSpans)
+
+	// Capture emit delays BEFORE timestamp injection strips the template attr.
+	delays := make(map[*otlptrace.Span]int64)
+	for _, sp := range allSpans {
+		if d := p.timestampInjector.ExtractEmitDelayMs(sp); d > 0 {
+			delays[sp] = d
+		}
+	}
+	p.timestampInjector.InjectSpanTimestamps(allSpans)
+
+	immediate = &otlptrace.ResourceSpans{
+		Resource:  clone.Resource,
+		SchemaUrl: clone.SchemaUrl,
+	}
+
+	for _, ss := range clone.ScopeSpans {
+		var immSpans []*otlptrace.Span
+		byDelay := make(map[int64][]*otlptrace.Span)
+		for _, sp := range ss.Spans {
+			if d, ok := delays[sp]; ok {
+				byDelay[d] = append(byDelay[d], sp)
+			} else {
+				immSpans = append(immSpans, sp)
+			}
+		}
+
+		if len(immSpans) > 0 {
+			immediate.ScopeSpans = append(immediate.ScopeSpans, &otlptrace.ScopeSpans{
+				Scope:     ss.Scope,
+				SchemaUrl: ss.SchemaUrl,
+				Spans:     immSpans,
+			})
+			immSpanCount += len(immSpans)
+		}
+
+		for d, spans := range byDelay {
+			deferred = append(deferred, deferredReq{
+				delayMs:   d,
+				spanCount: len(spans),
+				req: &otlpcollectortrace.ExportTraceServiceRequest{
+					ResourceSpans: []*otlptrace.ResourceSpans{
+						{
+							Resource:  clone.Resource,
+							SchemaUrl: clone.SchemaUrl,
+							ScopeSpans: []*otlptrace.ScopeSpans{
+								{Scope: ss.Scope, SchemaUrl: ss.SchemaUrl, Spans: spans},
+							},
+						},
+					},
+				},
+			})
 		}
 	}
 
-	return nil
+	return immediate, deferred, immSpanCount
 }
 
-// sendLargeTrace splits a trace with many spans across multiple batches
-func (p *WorkerPool) sendLargeTrace(ctx context.Context, rs *otlptrace.ResourceSpans, maxSpansPerBatch int) error {
-	// For each ScopeSpans in this ResourceSpans
+// enqueueDeferred schedules a late payload for export at now+delay.
+func (p *WorkerPool) enqueueDeferred(d deferredReq) {
+	if p.scheduler == nil {
+		return
+	}
+	sendAt := time.Now().Add(time.Duration(d.delayMs) * time.Millisecond)
+	p.scheduler.Enqueue(d.req, sendAt, d.spanCount)
+}
+
+// sendLargeImmediate splits an already-transformed trace with many immediate
+// spans across multiple batches. All chunks share the trace's single
+// (regenerated) trace ID.
+func (p *WorkerPool) sendLargeImmediate(ctx context.Context, rs *otlptrace.ResourceSpans, maxSpansPerBatch int) error {
 	for _, ss := range rs.ScopeSpans {
 		totalSpans := len(ss.Spans)
-
-		// Split spans into chunks
 		for offset := 0; offset < totalSpans; offset += maxSpansPerBatch {
 			select {
 			case <-ctx.Done():
@@ -442,7 +568,6 @@ func (p *WorkerPool) sendLargeTrace(ctx context.Context, rs *otlptrace.ResourceS
 				end = totalSpans
 			}
 
-			// Create a new ResourceSpans with just this chunk of spans
 			chunkRS := &otlptrace.ResourceSpans{
 				Resource:  rs.Resource,
 				SchemaUrl: rs.SchemaUrl,
@@ -455,8 +580,7 @@ func (p *WorkerPool) sendLargeTrace(ctx context.Context, rs *otlptrace.ResourceS
 				},
 			}
 
-			// Send this chunk as its own batch
-			if err := p.sendTraceBatch(ctx, []*otlptrace.ResourceSpans{chunkRS}); err != nil {
+			if err := p.sendRawTraceBatch(ctx, []*otlptrace.ResourceSpans{chunkRS}); err != nil {
 				return err
 			}
 		}
@@ -465,27 +589,25 @@ func (p *WorkerPool) sendLargeTrace(ctx context.Context, rs *otlptrace.ResourceS
 	return nil
 }
 
-// sendTraceBatch sends a single batch of traces
-func (p *WorkerPool) sendTraceBatch(ctx context.Context, batchResourceSpans []*otlptrace.ResourceSpans) error {
-	// Clone the batch
-	request := cloneTraceBatch(batchResourceSpans)
-
-	// Transform: regenerate IDs and inject timestamps
+// sendRawTraceBatch rate-limits and exports an already-transformed batch of
+// resource spans. It performs no cloning, ID regeneration, or timestamp
+// injection — that work happens once per trace in transformTrace.
+func (p *WorkerPool) sendRawTraceBatch(ctx context.Context, batchResourceSpans []*otlptrace.ResourceSpans) error {
 	spanCount := 0
-	for _, rs := range request.ResourceSpans {
+	for _, rs := range batchResourceSpans {
 		for _, ss := range rs.ScopeSpans {
-			p.idRegenerator.RegenerateTraceIDs(ss.Spans)
-			p.timestampInjector.InjectSpanTimestamps(ss.Spans)
 			spanCount += len(ss.Spans)
 		}
 	}
+	if spanCount == 0 {
+		return nil
+	}
 
-	// Rate limit
 	if err := p.rateLimiter.Wait(ctx, spanCount); err != nil {
 		return err
 	}
 
-	// Export
+	request := &otlpcollectortrace.ExportTraceServiceRequest{ResourceSpans: batchResourceSpans}
 	if err := p.traceExporter.Export(ctx, request); err != nil {
 		return err
 	}
