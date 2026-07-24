@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/honeycomb/telemetry-gen-and-send/internal/generator/common"
 	"google.golang.org/protobuf/proto"
 	otlpcollectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	otlptrace "go.opentelemetry.io/proto/otlp/trace/v1"
@@ -68,28 +69,12 @@ func (w *TraceWriter) tracesToOTLP(traces []*TraceTemplate) *otlpcollectortrace.
 	for _, trace := range traces {
 		spans := trace.CollectSpans()
 
-		// Create ResourceSpans for this trace with a generic resource
+		// Each trace becomes its own ResourceSpans. The resource carries the
+		// trace's entry-point (root) service.name so backends route the trace to
+		// the correct service dataset; per-span service.name is still set on each
+		// span for the other services involved in the trace.
 		rs := &otlptrace.ResourceSpans{
-			Resource: &resourcepb.Resource{
-				Attributes: []*commonpb.KeyValue{
-					{
-						Key: "telemetry.sdk.name",
-						Value: &commonpb.AnyValue{
-							Value: &commonpb.AnyValue_StringValue{
-								StringValue: "telemetry-generator",
-							},
-						},
-					},
-					{
-						Key: "telemetry.sdk.version",
-						Value: &commonpb.AnyValue{
-							Value: &commonpb.AnyValue_StringValue{
-								StringValue: "1.0.0",
-							},
-						},
-					},
-				},
-			},
+			Resource: buildTraceResource(trace.RootSpan.Service),
 			ScopeSpans: []*otlptrace.ScopeSpans{
 				{
 					Scope: &commonpb.InstrumentationScope{
@@ -152,6 +137,25 @@ func (w *TraceWriter) tracesToOTLP(traces []*TraceTemplate) *otlpcollectortrace.
 	}
 
 	return request
+}
+
+// buildTraceResource builds the OTLP resource for a trace. It sets
+// service.name (and service.namespace when present) from the trace's
+// entry-point (root) service so backends like Honeycomb route the trace to the
+// correct service dataset, alongside the generator's SDK identifiers. Per-span
+// service.name is still emitted for the other services in the trace.
+func buildTraceResource(rootService *ServiceNode) *resourcepb.Resource {
+	attrs := []*commonpb.KeyValue{
+		common.CreateStringAttribute("service.name", rootService.Name),
+	}
+	if rootService.Namespace != "" {
+		attrs = append(attrs, common.CreateStringAttribute("service.namespace", rootService.Namespace))
+	}
+	attrs = append(attrs,
+		common.CreateStringAttribute("telemetry.sdk.name", "telemetry-generator"),
+		common.CreateStringAttribute("telemetry.sdk.version", "1.0.0"),
+	)
+	return &resourcepb.Resource{Attributes: attrs}
 }
 
 // writeProtobuf writes the OTLP request as protobuf binary

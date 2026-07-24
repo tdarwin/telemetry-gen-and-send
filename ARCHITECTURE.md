@@ -276,7 +276,11 @@ When `traces.services.namespaces` or `traces.services.namespace_assignments` is 
 2. Any service in `Names` not covered by an explicit assignment is distributed round-robin across the `namespaces` list, iterated in `Names` order — so the mapping is deterministic and stays consistent across an entire generation run.
 3. If only `namespace_assignments` is provided (no `namespaces` list), services not listed there get no `service.namespace` attribute.
 
-The map is passed into `BuildTopology` and stored on each `ServiceNode.Namespace`. `generateAttributes` emits the attribute alongside `service.name` whenever `Namespace != ""`. The attribute lives on the span (not the OTLP `Resource`) for the same reason `service.name` does: each generated trace puts spans from multiple services into one `ResourceSpans` block, so per-service metadata must travel on the spans themselves.
+The map is passed into `BuildTopology` and stored on each `ServiceNode.Namespace`. `generateAttributes` emits the attribute alongside `service.name` on every span, because a generated trace puts spans from multiple services into one `ResourceSpans` block, so per-service metadata must travel on the spans themselves.
+
+### Resource-level service identity (dataset routing)
+
+Each trace's `ResourceSpans` also carries a **resource-level** `service.name` (and `service.namespace` when set), taken from the trace's entry-point (root) service — see `buildTraceResource` in `writer.go`. Backends like Honeycomb route trace data to a service dataset by the *resource* `service.name`, not span attributes; without it, everything lands in `unknown_service`. Because one `ResourceSpans` holds a multi-service trace, the resource uses the entry-point service as the trace's representative identity, while each span keeps its own `service.name` for the other services involved. (Ingress is randomized across services when `single: false`, so over a run traces spread across all service datasets.)
 
 #### 3. Metrics Generator (`internal/generator/metrics/`)
 
