@@ -38,10 +38,24 @@ func tmplSpan(spanID, parentID []byte, offset, dur, emitDelayMs int64) *otlptrac
 }
 
 func newTestPool() *WorkerPool {
+	return newTestPoolWithSequence(false)
+}
+
+func newTestPoolWithSequence(enabled bool) *WorkerPool {
 	return &WorkerPool{
 		timestampInjector: transformer.NewTimestampInjector(0, 0),
 		idRegenerator:     transformer.NewIDRegenerator(),
+		sequenceInjector:  transformer.NewSequenceInjector(enabled, "meta.sequence_id"),
 	}
+}
+
+func seqAttrValue(s *otlptrace.Span) (int64, bool) {
+	for _, a := range s.Attributes {
+		if a.Key == "meta.sequence_id" {
+			return a.Value.GetIntValue(), true
+		}
+	}
+	return 0, false
 }
 
 func oneTraceRS(spans ...*otlptrace.Span) *otlptrace.ResourceSpans {
@@ -245,5 +259,67 @@ func TestDeferredSchedulerMaxPending(t *testing.T) {
 	}
 	if got := s.dropped.Load(); got != 3 {
 		t.Errorf("dropped spans = %d, want 3", got)
+	}
+}
+
+// TestTransformTraceSequenceStampedIncludingDeferred verifies that both the
+// immediate spans and the deferred (late) spans coming out of transformTrace
+// carry a distinct meta.sequence_id — proving stamping happens before the
+// immediate/deferred partition, so late spans (consumed later by the
+// scheduler) are not missed.
+func TestTransformTraceSequenceStampedIncludingDeferred(t *testing.T) {
+	p := newTestPoolWithSequence(true)
+
+	root := tmplSpan([]byte("root0001"), nil, 0, 1_000_000, 90_000) // late root
+	c1 := tmplSpan([]byte("child001"), []byte("root0001"), 100, 500_000, 0)
+	c2 := tmplSpan([]byte("child002"), []byte("root0001"), 200, 500_000, 0)
+	rs := oneTraceRS(root, c1, c2)
+
+	immediate, deferred, _ := p.transformTrace(rs)
+
+	var all []*otlptrace.Span
+	for _, ss := range immediate.ScopeSpans {
+		all = append(all, ss.Spans...)
+	}
+	for _, ss := range deferred[0].req.ResourceSpans[0].ScopeSpans {
+		all = append(all, ss.Spans...)
+	}
+	if len(all) != 3 {
+		t.Fatalf("total emitted spans = %d, want 3", len(all))
+	}
+
+	seen := map[int64]bool{}
+	for _, s := range all {
+		v, ok := seqAttrValue(s)
+		if !ok {
+			t.Errorf("span %x missing meta.sequence_id attribute", s.SpanId)
+			continue
+		}
+		if seen[v] {
+			t.Errorf("duplicate sequence value %d", v)
+		}
+		seen[v] = true
+	}
+	if len(seen) != 3 {
+		t.Errorf("saw %d distinct sequence values, want 3", len(seen))
+	}
+}
+
+// TestTransformTraceSequenceDisabledNoAttr verifies no attribute is added when
+// the feature is off (default behavior unchanged).
+func TestTransformTraceSequenceDisabledNoAttr(t *testing.T) {
+	p := newTestPool() // sequencing disabled
+
+	root := tmplSpan([]byte("root0001"), nil, 0, 1_000_000, 0)
+	c1 := tmplSpan([]byte("child001"), []byte("root0001"), 100, 500_000, 0)
+	rs := oneTraceRS(root, c1)
+
+	immediate, _, _ := p.transformTrace(rs)
+	for _, ss := range immediate.ScopeSpans {
+		for _, s := range ss.Spans {
+			if _, ok := seqAttrValue(s); ok {
+				t.Errorf("span %x has meta.sequence_id even though sequencing is disabled", s.SpanId)
+			}
+		}
 	}
 }

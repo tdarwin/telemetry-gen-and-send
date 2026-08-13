@@ -33,6 +33,25 @@ func TestSenderDeferredDefaults(t *testing.T) {
 	}
 }
 
+func TestSenderSequenceDefaults(t *testing.T) {
+	c := baseSenderCfg()
+	c.ApplyDefaults()
+
+	if c.Sending.Sequence.Enabled {
+		t.Error("sequence.enabled default = true, want false")
+	}
+	if c.Sending.Sequence.AttributeKey != "meta.sequence_id" {
+		t.Errorf("sequence.attribute_key default = %q, want meta.sequence_id", c.Sending.Sequence.AttributeKey)
+	}
+
+	c = baseSenderCfg()
+	c.Sending.Sequence.AttributeKey = "custom.key"
+	c.ApplyDefaults()
+	if c.Sending.Sequence.AttributeKey != "custom.key" {
+		t.Errorf("explicit attribute_key = %q, want unchanged custom.key", c.Sending.Sequence.AttributeKey)
+	}
+}
+
 func TestSenderDeferredValidation(t *testing.T) {
 	c := baseSenderCfg()
 	c.Sending.Deferred.DrainTimeout = "not-a-duration"
