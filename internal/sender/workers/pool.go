@@ -14,6 +14,7 @@ import (
 	otlpcollectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	otlpcollectormetrics "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	otlpcollectorlogs "go.opentelemetry.io/proto/otlp/collector/logs/v1"
+	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	otlptrace "go.opentelemetry.io/proto/otlp/trace/v1"
 	otlpmetrics "go.opentelemetry.io/proto/otlp/metrics/v1"
 	otlplogs "go.opentelemetry.io/proto/otlp/logs/v1"
@@ -797,13 +798,33 @@ func cloneMetricsRequest(src *otlpcollectormetrics.ExportMetricsServiceRequest) 
 			// Deep copy metrics array
 			metrics := make([]*otlpmetrics.Metric, len(sm.Metrics))
 			for k, metric := range sm.Metrics {
-				// Deep copy each metric - the data points will be copied by value
-				metrics[k] = &otlpmetrics.Metric{
+				cloned := &otlpmetrics.Metric{
 					Name:        metric.Name,
 					Description: metric.Description,
 					Unit:        metric.Unit,
-					Data:        metric.Data, // This contains the data points
 				}
+				switch d := metric.Data.(type) {
+				case *otlpmetrics.Metric_Gauge:
+					cloned.Data = &otlpmetrics.Metric_Gauge{Gauge: &otlpmetrics.Gauge{
+						DataPoints: cloneNumberDataPoints(d.Gauge.DataPoints),
+					}}
+				case *otlpmetrics.Metric_Sum:
+					cloned.Data = &otlpmetrics.Metric_Sum{Sum: &otlpmetrics.Sum{
+						DataPoints:             cloneNumberDataPoints(d.Sum.DataPoints),
+						AggregationTemporality: d.Sum.AggregationTemporality,
+						IsMonotonic:            d.Sum.IsMonotonic,
+					}}
+				case *otlpmetrics.Metric_Histogram:
+					cloned.Data = &otlpmetrics.Metric_Histogram{Histogram: &otlpmetrics.Histogram{
+						DataPoints:             cloneHistogramDataPoints(d.Histogram.DataPoints),
+						AggregationTemporality: d.Histogram.AggregationTemporality,
+					}}
+				default:
+					// Unhandled oneof variant (e.g. Summary): not mutated by
+					// InjectMetricTimestamps or SequenceInjector today, safe to share.
+					cloned.Data = metric.Data
+				}
+				metrics[k] = cloned
 			}
 
 			resourceMetrics[i].ScopeMetrics[j] = &otlpmetrics.ScopeMetrics{
@@ -817,6 +838,48 @@ func cloneMetricsRequest(src *otlpcollectormetrics.ExportMetricsServiceRequest) 
 	return &otlpcollectormetrics.ExportMetricsServiceRequest{
 		ResourceMetrics: resourceMetrics,
 	}
+}
+
+// cloneNumberDataPoints deep-copies each NumberDataPoint so that mutating one
+// clone's timestamps or attributes never touches another clone's — or the
+// on-disk template's — data points. A prior shallow copy shared the exact
+// same *NumberDataPoint objects across every concurrent worker goroutine and
+// every sending.multiplier replay of the same template, which was a live
+// data race since InjectMetricTimestamps writes directly into them.
+func cloneNumberDataPoints(src []*otlpmetrics.NumberDataPoint) []*otlpmetrics.NumberDataPoint {
+	out := make([]*otlpmetrics.NumberDataPoint, len(src))
+	for i, dp := range src {
+		out[i] = &otlpmetrics.NumberDataPoint{
+			Attributes:        append([]*commonpb.KeyValue(nil), dp.Attributes...),
+			StartTimeUnixNano: dp.StartTimeUnixNano,
+			TimeUnixNano:      dp.TimeUnixNano,
+			Value:             dp.Value, // oneof leaf value, never mutated — safe to share
+			Exemplars:         dp.Exemplars,
+			Flags:             dp.Flags,
+		}
+	}
+	return out
+}
+
+// cloneHistogramDataPoints is the Histogram analog of cloneNumberDataPoints.
+func cloneHistogramDataPoints(src []*otlpmetrics.HistogramDataPoint) []*otlpmetrics.HistogramDataPoint {
+	out := make([]*otlpmetrics.HistogramDataPoint, len(src))
+	for i, dp := range src {
+		out[i] = &otlpmetrics.HistogramDataPoint{
+			Attributes:        append([]*commonpb.KeyValue(nil), dp.Attributes...),
+			StartTimeUnixNano: dp.StartTimeUnixNano,
+			TimeUnixNano:      dp.TimeUnixNano,
+			Count:             dp.Count,
+			Sum:               dp.Sum,
+			BucketCounts:      dp.BucketCounts,
+			ExplicitBounds:    dp.ExplicitBounds,
+			Exemplars:         dp.Exemplars,
+			Flags:             dp.Flags,
+			Min:               dp.Min,
+			Max:               dp.Max,
+		}
+	}
+	return out
 }
 
 func cloneLogsRequest(src *otlpcollectorlogs.ExportLogsServiceRequest) *otlpcollectorlogs.ExportLogsServiceRequest {
