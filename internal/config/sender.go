@@ -39,6 +39,23 @@ type SendingConfig struct {
 	Duration    string          `yaml:"duration"`
 	Multiplier  int             `yaml:"multiplier"`
 	Deferred    DeferredConfig  `yaml:"deferred"`
+	Sequence    SequenceConfig  `yaml:"sequence"`
+}
+
+// SequenceConfig configures the sequence-number attribute the sender can
+// stamp onto every span, metric data point, and log record it actually
+// exports. It is assigned at SEND time (not baked into templates) so it
+// stays unique across concurrent worker goroutines and across every
+// sending.multiplier replay of the same on-disk templates — the point is to
+// let the destination (e.g. Honeycomb) detect gaps from drops in transit.
+// Each signal (traces/metrics/logs) gets its own counter starting at 0.
+// Default disabled (no behavior change).
+type SequenceConfig struct {
+	Enabled bool `yaml:"enabled"`
+
+	// AttributeKey is the attribute key the sequence number is written under.
+	// Default "meta.sequence_id".
+	AttributeKey string `yaml:"attribute_key"`
 }
 
 // DeferredConfig configures the deferred-emission scheduler that exports spans
@@ -188,6 +205,10 @@ func (c *SenderConfig) ApplyDefaults() {
 	}
 	if c.Sending.Deferred.MaxPending == 0 {
 		c.Sending.Deferred.MaxPending = 100000
+	}
+
+	if c.Sending.Sequence.AttributeKey == "" {
+		c.Sending.Sequence.AttributeKey = "meta.sequence_id"
 	}
 }
 

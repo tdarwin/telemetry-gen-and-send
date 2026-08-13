@@ -30,6 +30,7 @@ type WorkerPool struct {
 	logsExporter      *exporter.LogsExporter
 	timestampInjector *transformer.TimestampInjector
 	idRegenerator     *transformer.IDRegenerator
+	sequenceInjector  *transformer.SequenceInjector
 	rateLimiter       *ratelimit.Limiter
 	reporter          *stats.Reporter
 	batchSizeTraces   int
@@ -61,6 +62,7 @@ func NewWorkerPool(
 	logsExporter *exporter.LogsExporter,
 	timestampInjector *transformer.TimestampInjector,
 	idRegenerator *transformer.IDRegenerator,
+	sequenceInjector *transformer.SequenceInjector,
 	rateLimiter *ratelimit.Limiter,
 	reporter *stats.Reporter,
 	batchSizeTraces int,
@@ -76,6 +78,7 @@ func NewWorkerPool(
 		logsExporter:      logsExporter,
 		timestampInjector: timestampInjector,
 		idRegenerator:     idRegenerator,
+		sequenceInjector:  sequenceInjector,
 		rateLimiter:       rateLimiter,
 		reporter:          reporter,
 		batchSizeTraces:   batchSizeTraces,
@@ -494,6 +497,7 @@ func (p *WorkerPool) transformTrace(rs *otlptrace.ResourceSpans) (immediate *otl
 		}
 	}
 	p.timestampInjector.InjectSpanTimestamps(allSpans)
+	p.sequenceInjector.StampSpans(allSpans)
 
 	immediate = &otlptrace.ResourceSpans{
 		Resource:  clone.Resource,
@@ -628,6 +632,7 @@ func (p *WorkerPool) sendMetrics(ctx context.Context) error {
 		for _, sm := range rm.ScopeMetrics {
 			for _, metric := range sm.Metrics {
 				p.timestampInjector.InjectMetricTimestamps(metric)
+				p.sequenceInjector.StampMetricDataPoints(metric)
 				dataPointCount += countMetricDataPoints(metric)
 			}
 		}
@@ -657,6 +662,7 @@ func (p *WorkerPool) sendLogs(ctx context.Context) error {
 	for _, rl := range request.ResourceLogs {
 		for _, sl := range rl.ScopeLogs {
 			p.timestampInjector.InjectLogTimestamps(sl.LogRecords)
+			p.sequenceInjector.StampLogRecords(sl.LogRecords)
 			logCount += len(sl.LogRecords)
 		}
 	}

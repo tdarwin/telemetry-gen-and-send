@@ -60,6 +60,15 @@ sending:
   #   duration: "0",  multiplier: 10  → Runs until 10 replays complete
   #   duration: "0",  multiplier: 0   → Runs indefinitely (Ctrl+C to stop)
 
+  sequence:
+    # When enabled, stamps a sequential integer attribute onto every span,
+    # metric data point, and log record actually sent (assigned at send
+    # time, so it stays unique across concurrency/multiplier replay).
+    # Use it to verify no data was lost between here and the destination
+    # (e.g. check for gaps in the attribute's value in Honeycomb).
+    enabled: false
+    attribute_key: "meta.sequence_id"
+
 timestamps:
   # Random jitter to add to timestamps (in milliseconds)
   # This spreads events across time for more realistic patterns

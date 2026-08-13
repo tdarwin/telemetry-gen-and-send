@@ -802,6 +802,24 @@ reads it in `transformTrace` and strips it in `removeTemplateAttributes`.
 bound the estimated in-memory dataset size; the estimate accounts for fat-span
 bytes so a large fat/gigatrace config can't silently try to build a huge file.
 
+## Sequence Numbering (data-loss verification)
+
+`sending.sequence` (sender-only, default disabled) stamps a `meta.sequence_id`
+integer attribute onto every span, metric data point, and log record actually
+sent, so a batch generated once and pushed through Refinery/a collector can be
+checked at the destination (e.g. Honeycomb) for gaps that indicate dropped
+data.
+
+Unlike the shape controls above, this has **no generator-side coupling** — it
+is assigned entirely at send time by `transformer.SequenceInjector`
+(`internal/sender/transformer/sequence.go`), stamped in `pool.go` right after
+timestamp injection for each signal (`transformTrace`, `sendMetrics`,
+`sendLogs`). It must be send-time rather than baked into the template because
+`sending.multiplier` can replay the same on-disk templates many times across
+`sending.concurrency` worker goroutines — a number assigned once at generation
+time would repeat on every replay. Each signal (traces/metrics/logs) gets its
+own atomic counter starting at 0, independent of the others.
+
 ## Configuration Reference
 
 ### Generator Config Structure
@@ -866,6 +884,9 @@ sending:
   concurrency: 10
   duration: "5m"        # Max duration (0 = no limit)
   multiplier: 10        # Replay count (0 = infinite)
+  sequence:
+    enabled: false
+    attribute_key: "meta.sequence_id"
 
 timestamps:
   jitter_ms: 100

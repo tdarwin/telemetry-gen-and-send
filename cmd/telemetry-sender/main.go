@@ -43,6 +43,9 @@ func main() {
 	fmt.Printf("OTLP Endpoint: %s\n", cfg.OTLP.Endpoint)
 	fmt.Printf("Rate limit: %d events/sec\n", cfg.Sending.RateLimit.EventsPerSecond)
 	fmt.Printf("Concurrency: %d workers\n", cfg.Sending.Concurrency)
+	if cfg.Sending.Sequence.Enabled {
+		fmt.Printf("Sequence numbering: enabled (attribute %q)\n", cfg.Sending.Sequence.AttributeKey)
+	}
 	fmt.Println()
 
 	// Load templates
@@ -93,6 +96,7 @@ func main() {
 	// Initialize transformers
 	timestampInjector := transformer.NewTimestampInjector(cfg.Timestamps.JitterMs, cfg.Timestamps.BackdateMs)
 	idRegenerator := transformer.NewIDRegenerator()
+	sequenceInjector := transformer.NewSequenceInjector(cfg.Sending.Sequence.Enabled, cfg.Sending.Sequence.AttributeKey)
 
 	// Initialize rate limiter
 	rateLimiter := ratelimit.NewLimiter(cfg.Sending.RateLimit.EventsPerSecond)
@@ -146,6 +150,7 @@ func main() {
 		logsExporter,
 		timestampInjector,
 		idRegenerator,
+		sequenceInjector,
 		rateLimiter,
 		reporter,
 		cfg.Sending.BatchSize.Traces,
