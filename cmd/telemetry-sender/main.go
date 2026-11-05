@@ -157,6 +157,13 @@ func main() {
 		},
 	)
 
+	metricsInterval, err := cfg.GetMetricsInterval()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	pool.SetMetricOptions(!cfg.Sending.StaticMetricValues, metricsInterval)
+
 	// Start sending
 	fmt.Println("═══════════════════════════════════════════════════════════")
 	fmt.Printf("Starting %d worker(s)...\n", cfg.Sending.Concurrency)

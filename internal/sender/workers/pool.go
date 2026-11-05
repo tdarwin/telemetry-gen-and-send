@@ -39,6 +39,11 @@ type WorkerPool struct {
 	// after the rest of their trace. nil when there is no trace exporter.
 	scheduler *deferredScheduler
 
+	// metricEvolver varies metric values between sends; nil replays the
+	// template unchanged.
+	metricEvolver   *transformer.MetricEvolver
+	metricsInterval time.Duration
+
 	// Worker distribution by signal type (exported for visibility)
 	TraceWorkers   int
 	MetricsWorkers int
@@ -91,6 +96,16 @@ func NewWorkerPool(
 	pool.calculateWorkerDistribution()
 
 	return pool
+}
+
+// SetMetricOptions configures how metrics are replayed. With varyValues the
+// pool changes values on every send (see transformer.MetricEvolver); interval
+// pauses each metrics worker between sends. Call it before Start.
+func (p *WorkerPool) SetMetricOptions(varyValues bool, interval time.Duration) {
+	p.metricsInterval = interval
+	if varyValues && p.templates.Metrics != nil {
+		p.metricEvolver = transformer.NewMetricEvolver(p.templates.Metrics, time.Now())
+	}
 }
 
 // calculateWorkerDistribution divides workers by signal type based on data volume
@@ -339,6 +354,14 @@ func (p *WorkerPool) metricsWorker(ctx context.Context, workerID int, multiplier
 		iteration++
 		if maxIterations < 0 && iteration > 1000000 {
 			iteration = 0 // Prevent overflow in infinite mode
+		}
+
+		if p.metricsInterval > 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(p.metricsInterval):
+			}
 		}
 	}
 }
@@ -618,8 +641,12 @@ func (p *WorkerPool) sendRawTraceBatch(ctx context.Context, batchResourceSpans [
 
 // sendMetrics sends a batch of metrics
 func (p *WorkerPool) sendMetrics(ctx context.Context) error {
-	// Deep copy the request
-	request := cloneMetricsRequest(p.templates.Metrics)
+	var request *otlpcollectormetrics.ExportMetricsServiceRequest
+	if p.metricEvolver != nil {
+		request = p.metricEvolver.Next(time.Now())
+	} else {
+		request = cloneMetricsRequest(p.templates.Metrics)
+	}
 
 	// Transform: inject timestamps
 	dataPointCount := 0

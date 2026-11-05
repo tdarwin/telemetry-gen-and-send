@@ -39,6 +39,15 @@ type SendingConfig struct {
 	Duration    string          `yaml:"duration"`
 	Multiplier  int             `yaml:"multiplier"`
 	Deferred    DeferredConfig  `yaml:"deferred"`
+
+	// StaticMetricValues replays metric values exactly as written in the
+	// template. By default values change on every send (gauges oscillate,
+	// counters and histograms grow); see transformer.MetricEvolver.
+	StaticMetricValues bool `yaml:"static_metric_values"`
+
+	// MetricsInterval is the pause between full metric sends, as a Go duration
+	// (for example "10s"). Empty or "0" sends as fast as the rate limit allows.
+	MetricsInterval string `yaml:"metrics_interval"`
 }
 
 // DeferredConfig configures the deferred-emission scheduler that exports spans
@@ -156,6 +165,16 @@ func (c *SenderConfig) Validate() error {
 		}
 	}
 
+	if c.Sending.MetricsInterval != "" {
+		d, err := time.ParseDuration(c.Sending.MetricsInterval)
+		if err != nil {
+			return fmt.Errorf("invalid sending.metrics_interval format: %w", err)
+		}
+		if d < 0 {
+			return fmt.Errorf("sending.metrics_interval must be non-negative")
+		}
+	}
+
 	if c.Sending.Deferred.MaxPending < 0 {
 		return fmt.Errorf("sending.deferred.max_pending must be non-negative")
 	}
@@ -195,6 +214,14 @@ func (c *SenderConfig) ApplyDefaults() {
 // timeout.
 func (c *SenderConfig) GetDeferredDrainTimeout() (time.Duration, error) {
 	return time.ParseDuration(c.Sending.Deferred.DrainTimeout)
+}
+
+// GetMetricsInterval parses and returns the pause between metric sends.
+func (c *SenderConfig) GetMetricsInterval() (time.Duration, error) {
+	if c.Sending.MetricsInterval == "" {
+		return 0, nil
+	}
+	return time.ParseDuration(c.Sending.MetricsInterval)
 }
 
 // GetDuration parses and returns the sending duration
