@@ -50,6 +50,16 @@ sending:
   # Set to 0 for infinite replay
   multiplier: 0
 
+  # Metric values change on every send by default (gauges oscillate, counters
+  # and histograms grow) so rate/increase/percentile queries show real data.
+  # Set to true to replay the template values unchanged.
+  # static_metric_values: false
+
+  # Pause between full metric sends (Go duration). Empty or "0" sends as fast as
+  # the rate limit allows. A realistic scrape interval such as "10s" or "15s"
+  # gives evenly spaced points.
+  # metrics_interval: "10s"
+
   # NOTE: The sender stops when EITHER:
   #   - All multiplier iterations complete, OR
   #   - The duration time expires (whichever comes first)

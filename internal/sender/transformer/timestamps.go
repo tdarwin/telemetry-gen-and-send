@@ -104,14 +104,19 @@ func (t *TimestampInjector) InjectMetricTimestamps(metric *otlpmetrics.Metric) {
 	case *otlpmetrics.Metric_Sum:
 		for _, dp := range data.Sum.DataPoints {
 			dp.TimeUnixNano = nowNano
-			// For cumulative sums, also set start time
-			dp.StartTimeUnixNano = nowNano
+			// For cumulative sums, also set start time unless a MetricEvolver
+			// already pinned one for the whole run.
+			if dp.StartTimeUnixNano == 0 {
+				dp.StartTimeUnixNano = nowNano
+			}
 		}
 
 	case *otlpmetrics.Metric_Histogram:
 		for _, dp := range data.Histogram.DataPoints {
 			dp.TimeUnixNano = nowNano
-			dp.StartTimeUnixNano = nowNano
+			if dp.StartTimeUnixNano == 0 {
+				dp.StartTimeUnixNano = nowNano
+			}
 		}
 	}
 }
